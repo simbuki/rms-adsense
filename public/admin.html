@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Admin dashboard — RMS AdSense</title>
+<link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body>
+<div id="nav-root"></div>
+
+<div class="wrap" style="padding-top: 28px; padding-bottom: 64px;">
+  <div class="eyebrow" style="color: var(--ink-40);">Sales &amp; admin</div>
+  <h1 class="f-display" style="font-size: 30px; font-weight: 700; margin: 0 0 20px;">Booking &amp; invoice control.</h1>
+
+  <div class="grid-stats" style="margin-bottom: 24px;" id="stats-root"></div>
+
+  <div class="pill-tabs" id="tabs-root"></div>
+  <div id="tab-content"></div>
+</div>
+
+<div id="footer-root"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="assets/config.js"></script>
+<script src="assets/app-data.js"></script>
+<script>
+  let tab = "queue";
+  let slots = [], bookings = [], invoices = [];
+  let queueSearch = "";
+  let invoiceSearch = "";
+  let editingSlotId = null;
+
+  async function loadData() {
+    await getStations();
+    slots = await getSlots();
+    bookings = await getBookings();
+    invoices = await getInvoices();
+  }
+
+  function renderStats() {
+    const counts = { open: 0, pending: 0, booked: 0 };
+    slots.forEach((s) => counts[s.status] = (counts[s.status] || 0) + 1);
+    const revenue = invoices.filter((inv) => inv.paymentStatus === "paid").reduce((sum, inv) => sum + inv.amount, 0);
+    document.getElementById("stats-root").innerHTML = `
+      <div class="card"><div class="f-display" style="font-size:28px; font-weight:700; color:var(--open);">${counts.open}</div><div style="font-size:12.5px; color:var(--ink-60);">Open slots</div></div>
+      <div class="card"><div class="f-display" style="font-size:28px; font-weight:700; color:var(--pending);">${counts.pending}</div><div style="font-size:12.5px; color:var(--ink-60);">Pending review</div></div>
+      <div class="card"><div class="f-display" style="font-size:28px; font-weight:700; color:var(--booked);">${counts.booked}</div><div style="font-size:12.5px; color:var(--ink-60);">Booked slots</div></div>
+      <div class="card"><div class="f-display" style="font-size:28px; font-weight:700;">${invoices.length}</div><div style="font-size:12.5px; color:var(--ink-60);">Invoices issued</div></div>
+      <div class="card"><div class="f-display" style="font-size:28px; font-weight:700; color:var(--open);">${KES(revenue)}</div><div style="font-size:12.5px; color:var(--ink-60);">Revenue collected</div></div>`;
+  }
+
+  function renderTabs() {
+    const pendingN = bookings.filter((b) => b.status === "pending").length;
+    const tabs = [
+      { id: "queue", label: `Pending queue (${pendingN})` },
+      { id: "newbooking", label: "New booking" },
+      { id: "catalogue", label: "Slot catalogue" },
+      { id: "invoices", label: "Invoices" },
+      { id: "revenue", label: "Revenue" },
+    ];
+    document.getElementById("tabs-root").innerHTML = tabs.map((t) =>
+      `<button type="button" class="pill-tab${tab === t.id ? " active" : ""}" data-tab="${t.id}">${t.label}</button>`
+    ).join("");
+    document.querySelectorAll("[data-tab]").forEach((btn) => {
+      btn.addEventListener("click", () => { tab = btn.dataset.tab; editingSlotId = null; renderTabs(); renderContent(); });
+    });
+  }
+
+  function searchBox(id, value, placeholder) {
+    return `<div class="field" style="max-width:320px; margin-bottom:16px;">
+      <input id="${id}" placeholder="${placeholder}" value="${value.replace(/"/g, "&quot;")}" />
+    </div>`;
+  }
+
+  function renderContent() {
+    const content = document.getElementById("tab-content");
+
+    if (tab === "queue") {
+      const pending = bookings.filter((b) => b.status === "pending")
+        .filter((b) => b.businessName.toLowerCase().includes(queueSearch.toLowerCase()));
+      content.innerHTML = searchBox("queue-search", queueSearch, "Search by business name…") + (
+        pending.length === 0
+        ? `<div class="empty">${queueSearch ? "No pending requests match that search." : "Nothing pending — every request has been reviewed."}</div>`
+        : pending.map((b) => {
+          const slot = slotById(b.slotId);
+          const station = stationById(slot.station_id);
+          return `
+          <div class="card" style="margin-bottom:12px;">
+            <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+              <div>
+                <div class="f-display" style="font-size:18px; font-weight:700;">${escapeHtml(b.businessName)}</div>
+                <div style="font-size:13px; color:var(--ink-60);">${escapeHtml(b.businessType)} · ${escapeHtml(b.county)}</div>
+              </div>
+              ${badgeHtml("pending")}
+            </div>
+            <div style="font-size:13.5px; margin-top:12px; background:var(--paper-dim); border-radius:8px; padding:12px;">
+              <strong>${escapeHtml(slot.label)}</strong> — ${escapeHtml(station.name)}, ${escapeHtml(slot.day)} ${escapeHtml(slot.time)} · ${KES(slot.price)}
+              <div style="margin-top:6px; color:var(--ink-60);">${escapeHtml(b.adDescription)}</div>
+              <div style="margin-top:6px; color:var(--ink-40); font-size:12px;">Creative: ${escapeHtml(b.fileName) || "none attached"} · Contact: ${escapeHtml(b.email)}, ${escapeHtml(b.phone)}</div>
+            </div>
+            <div style="display:flex; gap:10px; margin-top:14px;">
+              <button type="button" class="btn btn-outline btn-sm" data-reject="${b.id}" style="color:var(--rejected);">Reject</button>
+              <button type="button" class="btn btn-open btn-sm" data-approve="${b.id}">Approve &amp; invoice</button>
+            </div>
+          </div>`;
+        }).join("")
+      );
+
+      document.getElementById("queue-search").addEventListener("input", (e) => { queueSearch = e.target.value; renderContent(); });
+      content.querySelectorAll("[data-approve]").forEach((btn) => btn.addEventListener("click", () => approve(parseInt(btn.dataset.approve, 10), btn)));
+      content.querySelectorAll("[data-reject]").forEach((btn) => btn.addEventListener("click", () => reject(parseInt(btn.dataset.reject, 10), btn)));
+    }
+
+    if (tab === "catalogue") {
+      const stations = _stationsCache || [];
+      content.innerHTML = `
+        <div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:24px;">
+          <div class="card" style="flex:1; min-width:260px;">
+            <div class="f-display" style="font-weight:700; font-size:14.5px; margin-bottom:10px;">Add a station</div>
+            <div class="field"><label>Name</label><input id="st-name" placeholder="e.g. Egesa TV" /></div>
+            <div class="field"><label>Type</label>
+              <select id="st-type"><option value="TV">TV</option><option value="Radio">Radio</option></select>
+            </div>
+            <div class="field"><label>Note</label><input id="st-note" placeholder="e.g. Regional TV, Kisii" /></div>
+            <div id="st-result"></div>
+            <button type="button" class="btn btn-dark btn-sm" id="st-submit">Add station</button>
+          </div>
+          <div class="card" style="flex:1; min-width:260px;">
+            <div class="f-display" style="font-weight:700; font-size:14.5px; margin-bottom:10px;">Add a slot</div>
+            ${stations.length === 0 ? `<div class="empty">Add a station first.</div>` : `
+            <div class="field"><label>Station</label>
+              <select id="sl-station">${stations.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join("")}</select>
+            </div>
+            <div class="field"><label>Label</label><input id="sl-label" placeholder="e.g. Prime evening news break" /></div>
+            <div class="field"><label>Day</label><input id="sl-day" placeholder="e.g. Mon" /></div>
+            <div class="field"><label>Time</label><input id="sl-time" placeholder="e.g. 19:00" /></div>
+            <div class="field"><label>Duration (seconds)</label><input id="sl-duration" type="number" placeholder="30" /></div>
+            <div class="field"><label>Price (KES)</label><input id="sl-price" type="number" placeholder="45000" /></div>
+            <div class="field"><label>Tier</label>
+              <select id="sl-tier"><option value="standard">Standard</option><option value="premium">Premium</option></select>
+            </div>
+            <div id="sl-result"></div>
+            <button type="button" class="btn btn-dark btn-sm" id="sl-submit">Add slot</button>
+            `}
+          </div>
+        </div>
+        <div class="grid" id="slots-grid">${slots.map((s) => slotCardHtml(s)).join("")}</div>`;
+
+      document.getElementById("st-submit").addEventListener("click", async () => {
+        const resultRoot = document.getElementById("st-result");
+        const form = {
+          name: document.getElementById("st-name").value.trim(),
+          type: document.getElementById("st-type").value,
+          note: document.getElementById("st-note").value.trim(),
+        };
+        if (!form.name) { resultRoot.innerHTML = `<div class="error-box">Enter a station name.</div>`; return; }
+        try {
+          await createStation(form);
+          await refresh();
+        } catch (err) {
+          resultRoot.innerHTML = `<div class="error-box">${err.message || "Could not add this station."}</div>`;
+        }
+      });
+
+      const slSubmit = document.getElementById("sl-submit");
+      if (slSubmit) {
+        slSubmit.addEventListener("click", async () => {
+          const resultRoot = document.getElementById("sl-result");
+          const form = {
+            stationId: parseInt(document.getElementById("sl-station").value, 10),
+            label: document.getElementById("sl-label").value.trim(),
+            day: document.getElementById("sl-day").value.trim(),
+            time: document.getElementById("sl-time").value.trim(),
+            duration: parseInt(document.getElementById("sl-duration").value, 10),
+            price: parseInt(document.getElementById("sl-price").value, 10),
+            tier: document.getElementById("sl-tier").value,
+          };
+          if (!form.label || !form.day || !form.time || !form.duration || !form.price) {
+            resultRoot.innerHTML = `<div class="error-box">Fill in every field.</div>`;
+            return;
+          }
+          try {
+            await createSlot(form);
+            await refresh();
+          } catch (err) {
+            resultRoot.innerHTML = `<div class="error-box">${err.message || "Could not add this slot."}</div>`;
+          }
+        });
+      }
+
+      wireSlotCardEvents();
+    }
+
+    if (tab === "newbooking") {
+      const openSlots = slots.filter((s) => s.status === "open");
+      content.innerHTML = `
+        <div class="card" style="max-width:560px;">
+          <div class="f-display" style="font-weight:700; font-size:16px; margin-bottom:4px;">Add a booking directly</div>
+          <div style="font-size:13px; color:var(--ink-60); margin-bottom:16px;">
+            For phone-in or walk-in clients. This books the slot and issues the invoice immediately — it skips the pending queue.
+          </div>
+          ${openSlots.length === 0 ? `<div class="empty">No open slots available to book.</div>` : `
+          <div class="field">
+            <label>Slot</label>
+            <select id="nb-slot">
+              ${openSlots.map((s) => {
+                const st = stationById(s.station_id);
+                return `<option value="${s.id}">${escapeHtml(st.name)} — ${escapeHtml(s.label)} · ${escapeHtml(s.day)} ${escapeHtml(s.time)} · ${KES(s.price)}</option>`;
+              }).join("")}
+            </select>
+          </div>
+          <div class="field"><label>Business name</label><input id="nb-businessName" placeholder="e.g. GreenLeaf Agrovet" /></div>
+          <div class="field"><label>Business type</label><input id="nb-businessType" placeholder="e.g. Retail, Agribusiness" /></div>
+          <div class="field"><label>County</label><input id="nb-county" placeholder="e.g. Kiambu" /></div>
+          <div class="field"><label>Contact email</label><input id="nb-email" placeholder="you@business.co.ke" /></div>
+          <div class="field"><label>Contact phone</label><input id="nb-phone" placeholder="07XX XXX XXX" /></div>
+          <div class="field"><label>Ad description</label><textarea id="nb-adDescription" rows="3" placeholder="What is the advertisement about?"></textarea></div>
+          <div id="nb-result"></div>
+          <button type="button" class="btn btn-signal" id="nb-submit" style="margin-top:6px;">Book &amp; invoice →</button>
+          `}
+        </div>`;
+
+      const submitBtn = document.getElementById("nb-submit");
+      if (submitBtn) {
+        submitBtn.addEventListener("click", async () => {
+          const resultRoot = document.getElementById("nb-result");
+          const form = {
+            businessName: document.getElementById("nb-businessName").value.trim(),
+            businessType: document.getElementById("nb-businessType").value.trim(),
+            county: document.getElementById("nb-county").value.trim(),
+            email: document.getElementById("nb-email").value.trim(),
+            phone: document.getElementById("nb-phone").value.trim(),
+            adDescription: document.getElementById("nb-adDescription").value.trim(),
+          };
+          resultRoot.innerHTML = "";
+          if (Object.values(form).some((v) => !v)) {
+            resultRoot.innerHTML = `<div class="error-box">Fill in every field before booking.</div>`;
+            return;
+          }
+          const slotId = parseInt(document.getElementById("nb-slot").value, 10);
+          submitBtn.disabled = true;
+          submitBtn.textContent = "Booking…";
+          try {
+            const invoice = await adminCreateBooking(slotId, form);
+            await refresh();
+            tab = "invoices";
+            renderTabs();
+            renderContent();
+            const newResultRoot = document.getElementById("tab-content");
+            newResultRoot.insertAdjacentHTML("afterbegin", `<div class="success-box" style="margin-bottom:12px;">Booked — invoice ${invoice.invoiceNo} issued for ${KES(invoice.amount)}.</div>`);
+          } catch (err) {
+            resultRoot.innerHTML = `<div class="error-box">${err.message || "Could not create this booking. The slot may have just been taken — try another."}</div>`;
+            submitBtn.disabled = false;
+            submitBtn.textContent = "Book & invoice →";
+          }
+        });
+      }
+    }
+
+    if (tab === "invoices") {
+      const filtered = [...invoices].reverse().filter((inv) => {
+        const booking = bookings.find((b) => b.id === inv.bookingId);
+        const name = booking ? booking.businessName : "";
+        return name.toLowerCase().includes(invoiceSearch.toLowerCase());
+      });
+      content.innerHTML = searchBox("invoice-search", invoiceSearch, "Search by business name…") + (
+        filtered.length === 0
+        ? `<div class="empty">${invoiceSearch ? "No invoices match that search." : "No invoices issued yet."}</div>`
+        : filtered.map((inv) => {
+          const booking = bookings.find((b) => b.id === inv.bookingId);
+          return `
+          <div class="card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+            <div>
+              <div class="f-mono" style="font-size:13px; color:var(--ink-40);">${inv.invoiceNo}</div>
+              <div class="f-display" style="font-weight:700; font-size:16px;">${booking ? escapeHtml(booking.businessName) : "—"}</div>
+              <div style="font-size:12.5px; color:var(--ink-60);">Issued ${inv.issuedDate}</div>
+            </div>
+            <div style="text-align:right; display:flex; flex-direction:column; align-items:flex-end; gap:8px;">
+              <div class="f-display" style="font-weight:700; font-size:18px;">${KES(inv.amount)}</div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                ${badgeHtml(inv.paymentStatus)}
+                ${inv.paymentStatus === "paid" && inv.paymentMethod === "manual"
+                  ? `<span class="f-mono" style="font-size:10.5px; color:var(--ink-40); text-transform:uppercase;">Manual</span>`
+                  : inv.paymentStatus === "unpaid"
+                  ? `<button type="button" class="btn btn-outline btn-sm" data-mark-paid="${inv.id}">Mark as paid</button>`
+                  : ""}
+              </div>
+            </div>
+          </div>`;
+        }).join("")
+      );
+
+      document.getElementById("invoice-search").addEventListener("input", (e) => { invoiceSearch = e.target.value; renderContent(); });
+      content.querySelectorAll("[data-mark-paid]").forEach((btn) => {
+        btn.addEventListener("click", () => markPaid(parseInt(btn.dataset.markPaid, 10), btn));
+      });
+    }
+
+    if (tab === "revenue") {
+      content.innerHTML = revenueChartHtml();
+    }
+  }
+
+  /* ---------- Catalogue: slot cards with inline edit/delete ---------- */
+
+  function slotCardHtml(s) {
+    const station = stationById(s.station_id);
+    if (editingSlotId === s.id) {
+      return `
+      <div class="card">
+        <div class="f-mono" style="font-size:11px; color:var(--ink-40); text-transform:uppercase; margin-bottom:8px;">${escapeHtml(station.name)} — editing</div>
+        <div class="field"><label>Label</label><input id="edit-label-${s.id}" value="${escapeHtml(s.label)}" /></div>
+        <div class="field"><label>Day</label><input id="edit-day-${s.id}" value="${s.day}" /></div>
+        <div class="field"><label>Time</label><input id="edit-time-${s.id}" value="${s.time}" /></div>
+        <div class="field"><label>Duration (s)</label><input id="edit-duration-${s.id}" type="number" value="${s.duration}" /></div>
+        <div class="field"><label>Price (KES)</label><input id="edit-price-${s.id}" type="number" value="${s.price}" /></div>
+        <div class="field"><label>Tier</label>
+          <select id="edit-tier-${s.id}">
+            <option value="standard" ${s.tier === "standard" ? "selected" : ""}>Standard</option>
+            <option value="premium" ${s.tier === "premium" ? "selected" : ""}>Premium</option>
+          </select>
+        </div>
+        <div class="field"><label>Status</label>
+          <select id="edit-status-${s.id}">
+            <option value="open" ${s.status === "open" ? "selected" : ""}>Open</option>
+            <option value="pending" ${s.status === "pending" ? "selected" : ""}>Pending</option>
+            <option value="booked" ${s.status === "booked" ? "selected" : ""}>Booked</option>
+          </select>
+        </div>
+        <div id="edit-result-${s.id}"></div>
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <button type="button" class="btn btn-outline btn-sm" data-cancel-edit="${s.id}">Cancel</button>
+          <button type="button" class="btn btn-dark btn-sm" data-save-slot="${s.id}">Save</button>
+        </div>
+      </div>`;
+    }
+    return `
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
+        <span class="f-mono" style="font-size:11px; color:var(--ink-40); text-transform:uppercase;">${escapeHtml(station.name)}</span>
+        ${badgeHtml(s.status)}
+      </div>
+      <div class="f-display" style="font-weight:700; font-size:15.5px;">${escapeHtml(s.label)}</div>
+      <div style="font-size:12.5px; color:var(--ink-60); margin-top:4px;">${s.day}, ${s.time} · ${s.duration}s · ${KES(s.price)}</div>
+      <div style="display:flex; gap:8px; margin-top:12px;">
+        <button type="button" class="btn btn-outline btn-sm" data-edit-slot="${s.id}">Edit</button>
+        ${s.status === "open" ? `<button type="button" class="btn btn-outline btn-sm" data-delete-slot="${s.id}" style="color:var(--rejected);">Delete</button>` : ""}
+      </div>
+    </div>`;
+  }
+
+  function wireSlotCardEvents() {
+    document.querySelectorAll("[data-edit-slot]").forEach((btn) => {
+      btn.addEventListener("click", () => { editingSlotId = parseInt(btn.dataset.editSlot, 10); renderContent(); });
+    });
+    document.querySelectorAll("[data-cancel-edit]").forEach((btn) => {
+      btn.addEventListener("click", () => { editingSlotId = null; renderContent(); });
+    });
+    document.querySelectorAll("[data-save-slot]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = parseInt(btn.dataset.saveSlot, 10);
+        const resultRoot = document.getElementById(`edit-result-${id}`);
+        const form = {
+          label: document.getElementById(`edit-label-${id}`).value.trim(),
+          day: document.getElementById(`edit-day-${id}`).value.trim(),
+          time: document.getElementById(`edit-time-${id}`).value.trim(),
+          duration: parseInt(document.getElementById(`edit-duration-${id}`).value, 10),
+          price: parseInt(document.getElementById(`edit-price-${id}`).value, 10),
+          tier: document.getElementById(`edit-tier-${id}`).value,
+          status: document.getElementById(`edit-status-${id}`).value,
+        };
+        if (!form.label || !form.day || !form.time || !form.duration || !form.price) {
+          resultRoot.innerHTML = `<div class="error-box">Fill in every field.</div>`;
+          return;
+        }
+        try {
+          await updateSlot(id, form);
+          editingSlotId = null;
+          await refresh();
+        } catch (err) {
+          resultRoot.innerHTML = `<div class="error-box">${err.message || "Could not save this slot."}</div>`;
+        }
+      });
+    });
+    document.querySelectorAll("[data-delete-slot]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = parseInt(btn.dataset.deleteSlot, 10);
+        if (!confirm("Delete this slot? This can't be undone.")) return;
+        try {
+          await deleteSlot(id);
+          await refresh();
+        } catch (err) {
+          alert(err.message || "Could not delete this slot.");
+        }
+      });
+    });
+  }
+
+  /* ---------- Revenue: simple last-6-months bar chart ---------- */
+
+  function revenueChartHtml() {
+    const now = new Date();
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push({ key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`, label: d.toLocaleString("en-KE", { month: "short" }), total: 0 });
+    }
+    invoices.filter((inv) => inv.paymentStatus === "paid").forEach((inv) => {
+      const key = inv.issuedDate.slice(0, 7);
+      const m = months.find((m) => m.key === key);
+      if (m) m.total += inv.amount;
+    });
+    const max = Math.max(1, ...months.map((m) => m.total));
+    const totalRevenue = months.reduce((sum, m) => sum + m.total, 0);
+
+    return `
+      <div class="card">
+        <div class="f-display" style="font-weight:700; font-size:16px; margin-bottom:2px;">Revenue, last 6 months</div>
+        <div style="font-size:13px; color:var(--ink-60); margin-bottom:20px;">${KES(totalRevenue)} collected in this window · based on invoices marked paid</div>
+        <div style="display:flex; align-items:flex-end; gap:18px; height:180px; padding:0 4px;">
+          ${months.map((m) => `
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%;">
+              <div style="font-size:11.5px; color:var(--ink-60); margin-bottom:6px;">${m.total > 0 ? KES(m.total) : ""}</div>
+              <div style="width:100%; max-width:44px; height:${Math.max(4, Math.round((m.total / max) * 130))}px; background:var(--open); border-radius:6px 6px 0 0;"></div>
+              <div style="font-size:12px; color:var(--ink-40); margin-top:8px;">${m.label}</div>
+            </div>`).join("")}
+        </div>
+      </div>`;
+  }
+
+  async function approve(bookingId, btn) {
+    btn.disabled = true;
+    btn.textContent = "Approving…";
+    try {
+      await approveBooking(bookingId);
+      await refresh();
+    } catch (err) {
+      alert(err.message || "Could not approve this booking.");
+      btn.disabled = false;
+      btn.textContent = "Approve & invoice";
+    }
+  }
+
+  async function reject(bookingId, btn) {
+    btn.disabled = true;
+    btn.textContent = "Rejecting…";
+    try {
+      await rejectBooking(bookingId);
+      await refresh();
+    } catch (err) {
+      alert(err.message || "Could not reject this booking.");
+      btn.disabled = false;
+      btn.textContent = "Reject";
+    }
+  }
+
+  async function markPaid(invoiceId, btn) {
+    if (!confirm("Mark this invoice as paid? Only do this after confirming payment was received outside M-Pesa (cash, bank transfer, etc).")) return;
+    btn.disabled = true;
+    btn.textContent = "Marking…";
+    try {
+      await markInvoicePaid(invoiceId);
+      await refresh();
+    } catch (err) {
+      alert(err.message || "Could not mark this invoice as paid.");
+      btn.disabled = false;
+      btn.textContent = "Mark as paid";
+    }
+  }
+
+  async function refresh() {
+    await loadData();
+    renderStats();
+    renderTabs();
+    renderContent();
+  }
+
+  async function init() {
+    const session = await requireRole("admin");
+    if (!session) return;
+
+    renderNav("admin");
+    renderFooter("footer-root");
+
+    await refresh();
+  }
+
+  init();
+</script>
+</body>
+</html>

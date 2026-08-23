@@ -1,0 +1,59 @@
+---
+src/pages/index.astro
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RMS AdSense — airtime booking marketplace</title>
+  <meta name="description" content="Book Royal Media Services airtime slots directly. Self-serve marketplace for TV and radio ad slots across Kenya." />
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <div id="nav-root"></div>
+
+  <div class="ticker-wrap">
+    <div class="ticker-track">
+      ••• BROADCAST AIRTIME BOOKING ••• TRANSPARENT RATES ••• INSTANT CONFIRMATION ••• BROADCAST AIRTIME BOOKING •••
+    </div>
+  </div>
+
+  <div class="wrap" style="max-width: 1000px; padding-top: 64px; padding-bottom: 100px;">
+    <div style="max-width: 720px;">
+      <h1 class="f-display" style="font-size: 48px; line-height: 1.05; font-weight: 800; margin-bottom: 16px; text-transform: uppercase;">
+        Book Royal Media Services airtime slots directly.
+      </h1>
+      <p style="font-size: 18px; color: var(--ink-60); max-width: 600px; line-height: 1.6; margin-bottom: 28px;">
+        Self-serve marketplace for TV and radio ad slots across Kenya's biggest networks. Instant approval. Real M-Pesa payments. No middleman.
+      </p>
+      <div style="display: flex; gap: 14px; flex-wrap: wrap;">
+        <a href="/browse.html" class="btn btn-signal">Browse slots →</a>
+        <a href="/login.html" class="btn btn-outline">Log in</a>
+      </div>
+    </div>
+
+    <div style="margin-top: 80px; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px;">
+      <div class="card">
+        <div class="f-display" style="font-size: 32px; font-weight: 700; color: var(--signal); margin-bottom: 8px;">100+</div>
+        <div style="font-size: 14px; color: var(--ink-60);">Ad slots available</div>
+      </div>
+      <div class="card">
+        <div class="f-display" style="font-size: 32px; font-weight: 700; color: var(--open); margin-bottom: 8px;">7</div>
+        <div style="font-size: 14px; color: var(--ink-60);">TV & radio stations</div>
+      </div>
+      <div class="card">
+        <div class="f-display" style="font-size: 32px; font-weight: 700; color: var(--booked); margin-bottom: 8px;">KES 5K–45K</div>
+        <div style="font-size: 14px; color: var(--ink-60);">Slot pricing</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="footer-root"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="/assets/config.js"></script>
+  <script src="/assets/app-data.js"></script>
+</body>
+</html>

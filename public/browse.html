@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Browse slots — RMS AdSense</title>
+<link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body>
+<div id="nav-root"></div>
+
+<div class="wrap" style="padding-top: 28px; padding-bottom: 64px;">
+  <div class="eyebrow" style="color: var(--ink-40);">Browse slots</div>
+  <h1 class="f-display" style="font-size: 30px; font-weight: 700; margin: 0 0 20px;">Available airtime this week.</h1>
+
+  <div id="confirm-root"></div>
+
+  <div class="pill-tabs" id="filter-root"></div>
+  <div class="grid" id="slots-root"></div>
+</div>
+
+<div class="modal-backdrop" id="modal-backdrop">
+  <div class="modal">
+    <div class="f-mono" style="font-size:11px; color:var(--ink-40); text-transform:uppercase; letter-spacing:0.06em;">Booking request</div>
+    <div class="f-display" id="modal-title" style="font-size:22px; font-weight:700; margin: 4px 0 2px;"></div>
+    <div id="modal-sub" style="font-size:13px; color:var(--ink-60); margin-bottom:20px;"></div>
+
+    <form id="booking-form">
+      <div class="field"><label>Business name</label><input id="f-businessName" placeholder="e.g. GreenLeaf Agrovet" /></div>
+      <div class="field"><label>Business type</label><input id="f-businessType" placeholder="e.g. Retail, Agribusiness" /></div>
+      <div class="field"><label>County</label><input id="f-county" placeholder="e.g. Kiambu" /></div>
+      <div class="field"><label>Contact email</label><input id="f-email" placeholder="you@business.co.ke" /></div>
+      <div class="field"><label>Contact phone</label><input id="f-phone" placeholder="07XX XXX XXX" /></div>
+      <div class="field"><label>Ad description</label><textarea id="f-adDescription" rows="3" placeholder="What is the advertisement about?"></textarea></div>
+      <div class="field">
+        <label>Creative file</label>
+        <label style="display:flex; align-items:center; gap:8px; border:1px dashed var(--line); border-radius:8px; padding:11px 12px; font-size:13.5px; color:var(--ink-60); cursor:pointer;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <span id="file-label">Choose a file to attach</span>
+          <input id="f-file" type="file" style="display:none;" />
+        </label>
+      </div>
+      <div id="modal-error"></div>
+      <div style="display:flex; gap:10px; margin-top: 6px;">
+        <button type="button" class="btn btn-outline" style="flex:1;" id="modal-cancel">Cancel</button>
+        <button type="submit" class="btn btn-signal" style="flex:1;" id="modal-submit">Submit request</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="footer-root"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="assets/config.js"></script>
+<script src="assets/app-data.js"></script>
+<script>
+  let session = null;
+  let filterType = "All";
+  let activeSlot = null;
+
+  const iconTv = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M7 3l5 4 5-4"/></svg>`;
+  const iconRadio = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="14" r="4"/><path d="M4 10L18 4l2 2"/><path d="M2 14h.01M6 18h.01"/></svg>`;
+  const iconClock = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
+  const iconCal = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`;
+
+  function renderFilters() {
+    const root = document.getElementById("filter-root");
+    root.innerHTML = ["All", "TV", "Radio"].map((f) =>
+      `<button type="button" class="chip${filterType === f ? " active" : ""}" data-filter="${f}">${f}</button>`
+    ).join("");
+    root.querySelectorAll(".chip").forEach((btn) => {
+      btn.addEventListener("click", () => { filterType = btn.dataset.filter; renderFilters(); renderSlots(); });
+    });
+  }
+
+  async function renderSlots() {
+    const allSlots = await getSlots();
+    const slots = allSlots.filter((s) => filterType === "All" || stationById(s.station_id).type === filterType);
+    const root = document.getElementById("slots-root");
+    root.innerHTML = slots.map((s) => {
+      const st = stationById(s.station_id);
+      const open = s.status === "open";
+      return `
+      <div class="card card-hover" style="display:flex; flex-direction:column; gap:10px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+          <div style="display:flex; align-items:center; gap:6px; color:var(--ink-40);">
+            ${st.type === "TV" ? iconTv : iconRadio}
+            <span class="f-mono" style="font-size:11.5px; text-transform:uppercase; letter-spacing:0.04em;">${escapeHtml(st.name)}</span>
+          </div>
+          ${badgeHtml(s.status)}
+        </div>
+        <div class="f-display" style="font-size:18px; font-weight:700;">${escapeHtml(s.label)}</div>
+        <div style="font-size:13px; color:var(--ink-60); display:flex; gap:12px; flex-wrap:wrap;">
+          <span style="display:flex; align-items:center; gap:4px;">${iconCal} ${s.day}, ${s.time}</span>
+          <span style="display:flex; align-items:center; gap:4px;">${iconClock} ${s.duration}s</span>
+        </div>
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-top:4px;">
+          <div>
+            <div class="f-display" style="font-size:20px; font-weight:700;">${KES(s.price)}</div>
+            <div class="f-mono" style="font-size:10.5px; color:var(--ink-40); text-transform:uppercase;">${s.tier} tier</div>
+          </div>
+          <button type="button" class="btn ${open ? "btn-dark" : "btn-outline"} btn-sm" data-book="${s.id}" ${open ? "" : "disabled"}>
+            ${open ? "Book slot" : "Unavailable"}
+          </button>
+        </div>
+      </div>`;
+    }).join("") || `<div class="empty">No slots match this filter.</div>`;
+
+    root.querySelectorAll("[data-book]").forEach((btn) => {
+      btn.addEventListener("click", () => openModal(parseInt(btn.dataset.book, 10)));
+    });
+  }
+
+  function openModal(slotId) {
+    activeSlot = slotById(slotId);
+    if (!activeSlot) return;
+    document.getElementById("modal-title").textContent = activeSlot.label;
+    document.getElementById("modal-sub").textContent =
+      `${stationById(activeSlot.station_id).name} · ${activeSlot.day}, ${activeSlot.time} · ${KES(activeSlot.price)}`;
+    document.getElementById("booking-form").reset();
+    document.getElementById("file-label").textContent = "Choose a file to attach";
+    document.getElementById("modal-error").innerHTML = "";
+    document.getElementById("f-email").value = session.email;
+    document.getElementById("f-businessName").value = session.name;
+    document.getElementById("modal-backdrop").classList.add("open");
+  }
+  function closeModal() { document.getElementById("modal-backdrop").classList.remove("open"); activeSlot = null; }
+
+  document.getElementById("modal-cancel").addEventListener("click", closeModal);
+  document.getElementById("modal-backdrop").addEventListener("click", (e) => { if (e.target.id === "modal-backdrop") closeModal(); });
+  document.getElementById("f-file").addEventListener("change", (e) => {
+    document.getElementById("file-label").textContent = e.target.files[0] ? e.target.files[0].name : "Choose a file to attach";
+  });
+
+  document.getElementById("booking-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const form = {
+      businessName: document.getElementById("f-businessName").value.trim(),
+      businessType: document.getElementById("f-businessType").value.trim(),
+      county: document.getElementById("f-county").value.trim(),
+      email: document.getElementById("f-email").value.trim(),
+      phone: document.getElementById("f-phone").value.trim(),
+      adDescription: document.getElementById("f-adDescription").value.trim(),
+    };
+    if (Object.values(form).some((v) => !v)) {
+      document.getElementById("modal-error").innerHTML = `<div class="error-box">Fill in every field before submitting — RMS needs full details to review your request.</div>`;
+      return;
+    }
+
+    const file = document.getElementById("f-file").files[0] || null;
+    const submitBtn = document.getElementById("modal-submit");
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Submitting…";
+
+    try {
+      const newBooking = await submitBooking(activeSlot.id, form, file, session.id);
+      const bookedLabel = activeSlot.label;
+      closeModal();
+      document.getElementById("confirm-root").innerHTML =
+        `<div class="success-box"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        Request submitted for <strong>&nbsp;${escapeHtml(bookedLabel)}</strong> — it's now pending RMS review. Track it on your <a href="dashboard.html" style="color:var(--open); font-weight:600;">dashboard</a>.</div>`;
+      renderSlots();
+    } catch (err) {
+      document.getElementById("modal-error").innerHTML = `<div class="error-box">${err.message || "Could not submit the booking. The slot may have just been taken — try another."}</div>`;
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Submit request";
+    }
+  });
+
+  async function init() {
+    session = await requireRole("client");
+    if (!session) return;
+
+    renderNav("browse");
+    renderFooter("footer-root");
+
+    await getStations();
+    renderFilters();
+    renderSlots();
+  }
+
+  init();
+</script>
+</body>
+</html>

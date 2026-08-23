@@ -1,0 +1,18 @@
+{
+  "name": "rms-adsense",
+  "version": "1.0.0",
+  "description": "Royal Media Services airtime booking marketplace",
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check": "astro check"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2"
+  },
+  "devDependencies": {
+    "astro": "^4"
+  }
+}

@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pay invoice — RMS AdSense</title>
+<link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body>
+<div id="nav-root"></div>
+
+<div class="wrap" style="max-width: 520px; padding-top: 28px; padding-bottom: 64px;">
+  <div class="eyebrow" style="color: var(--ink-40);">Payment</div>
+  <h1 class="f-display" style="font-size: 30px; font-weight: 700; margin: 0 0 20px;">Settle your invoice.</h1>
+  <div id="content-root"></div>
+</div>
+
+<div id="footer-root"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="assets/config.js"></script>
+<script src="assets/app-data.js"></script>
+<script>
+  let session, invoice, booking, slot;
+  const content = document.getElementById("content-root");
+  let pollTimer = null;
+
+  function renderPaymentForm() {
+    const station = stationById(slot.station_id);
+    content.innerHTML = `
+      <div class="card" style="margin-bottom: 20px;">
+        <div class="f-mono" style="font-size:12px; color:var(--ink-40);">${invoice.invoiceNo}</div>
+        <div class="f-display" style="font-size:20px; font-weight:700; margin:4px 0 2px;">${escapeHtml(slot.label)}</div>
+        <div style="font-size:13px; color:var(--ink-60); margin-bottom:14px;">${escapeHtml(station.name)} · ${escapeHtml(slot.day)}, ${escapeHtml(slot.time)}</div>
+        <div style="display:flex; justify-content:space-between; border-top:1px solid var(--line); padding-top:12px;">
+          <span style="font-size:14px; color:var(--ink-60);">Amount due</span>
+          <span class="f-display" style="font-size:22px; font-weight:700;">${KES(invoice.amount)}</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="font-weight:700; font-size:14px; margin-bottom:14px;">Payment method</div>
+        <div class="pill-tabs" id="method-tabs">
+          <button type="button" class="pill-tab active" data-method="mpesa">M-Pesa</button>
+          <button type="button" class="pill-tab" data-method="card">Card</button>
+        </div>
+
+        <div id="mpesa-fields">
+          <div class="field"><label>M-Pesa phone number</label><input id="mpesa-phone" placeholder="07XX XXX XXX" value="${booking.phone}" /></div>
+          <div class="hint">You'll get an STK push prompt to enter your PIN and confirm.</div>
+        </div>
+        <div id="card-fields" style="display:none;">
+          <div class="error-box">Card payments aren't enabled on this deployment yet — a PCI-compliant provider needs to be connected first. Please use M-Pesa for now.</div>
+        </div>
+
+        <div id="pay-error"></div>
+        <button type="button" class="btn btn-signal btn-block" id="pay-btn" style="margin-top: 6px;">Send M-Pesa prompt for ${KES(invoice.amount)}</button>
+        <div class="hint" style="text-align:center; margin-top:10px;">Your slot is confirmed as soon as payment is completed.</div>
+      </div>
+    `;
+
+    let method = "mpesa";
+    document.querySelectorAll("#method-tabs .pill-tab").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        method = btn.dataset.method;
+        document.querySelectorAll("#method-tabs .pill-tab").forEach((b) => b.classList.toggle("active", b === btn));
+        document.getElementById("mpesa-fields").style.display = method === "mpesa" ? "block" : "none";
+        document.getElementById("card-fields").style.display = method === "card" ? "block" : "none";
+        const payBtn = document.getElementById("pay-btn");
+        payBtn.style.display = method === "mpesa" ? "inline-flex" : "none";
+      });
+    });
+
+    document.getElementById("pay-btn").addEventListener("click", async () => {
+      const errorRoot = document.getElementById("pay-error");
+      errorRoot.innerHTML = "";
+      const phone = document.getElementById("mpesa-phone").value.trim();
+      if (!phone) {
+        errorRoot.innerHTML = `<div class="error-box">Enter the M-Pesa number to send the payment prompt to.</div>`;
+        return;
+      }
+      const btn = document.getElementById("pay-btn");
+      btn.disabled = true;
+      btn.textContent = "Sending prompt…";
+      try {
+        await payWithMpesa(invoice.id, phone);
+        showAwaitingConfirmation();
+      } catch (err) {
+        errorRoot.innerHTML = `<div class="error-box">${err.message || "Could not start the M-Pesa payment. Try again."}</div>`;
+        btn.disabled = false;
+        btn.textContent = `Send M-Pesa prompt for ${KES(invoice.amount)}`;
+      }
+    });
+  }
+
+  function showAwaitingConfirmation() {
+    content.innerHTML = `
+      <div class="card" style="text-align:center; padding: 48px 24px;">
+        <div class="f-display" style="font-size:18px; font-weight:700; margin-bottom:8px;">Check your phone</div>
+        <div style="font-size:13.5px; color:var(--ink-60);">Enter your M-Pesa PIN on the STK prompt to confirm. This page will update automatically once payment is received.</div>
+      </div>`;
+
+    let attempts = 0;
+    pollTimer = setInterval(async () => {
+      attempts += 1;
+      const invoices = await getInvoices();
+      const updated = invoices.find((inv) => inv.id === invoice.id);
+      if (updated && updated.paymentStatus === "paid") {
+        clearInterval(pollTimer);
+        invoice = updated;
+        content.innerHTML = receiptHtml(invoice, booking, slot, false);
+      } else if (attempts >= 40) { // ~2 minutes at 3s intervals
+        clearInterval(pollTimer);
+        content.innerHTML = `
+          <div class="card" style="text-align:center; padding: 40px 24px;">
+            <div class="f-display" style="font-size:17px; font-weight:700; margin-bottom:8px;">Still waiting on confirmation</div>
+            <div style="font-size:13.5px; color:var(--ink-60); margin-bottom:18px;">If you completed the M-Pesa prompt, it can take a minute to reflect. Otherwise the request may have timed out.</div>
+            <button type="button" class="btn btn-dark" id="retry-btn">Try again</button>
+          </div>`;
+        document.getElementById("retry-btn").addEventListener("click", renderPaymentForm);
+      }
+    }, 3000);
+  }
+
+  function receiptHtml(inv, booking, slot, alreadyPaid) {
+    const station = stationById(slot.station_id);
+    return `
+      <div class="success-box" style="margin-bottom:20px;">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        ${alreadyPaid ? "This invoice has already been paid." : "Payment confirmed — the slot is booked."}
+      </div>
+      <div class="card">
+        <div style="text-align:center; margin-bottom: 18px;">
+          <div class="f-mono" style="font-size:11px; color:var(--ink-40); text-transform:uppercase; letter-spacing:0.06em;">Receipt</div>
+          <div class="f-display" style="font-size:26px; font-weight:800; margin-top:4px;">${KES(inv.amount)}</div>
+        </div>
+        <div style="border-top:1px dashed var(--line); padding-top:16px; display:flex; flex-direction:column; gap:10px; font-size:13.5px;">
+          <div style="display:flex; justify-content:space-between;"><span style="color:var(--ink-60);">Invoice</span><span class="f-mono">${inv.invoiceNo}</span></div>
+          <div style="display:flex; justify-content:space-between;"><span style="color:var(--ink-60);">Slot</span><span>${escapeHtml(slot.label)}</span></div>
+          <div style="display:flex; justify-content:space-between;"><span style="color:var(--ink-60);">Station</span><span>${escapeHtml(station.name)}</span></div>
+          <div style="display:flex; justify-content:space-between;"><span style="color:var(--ink-60);">Air date</span><span>${escapeHtml(slot.day)}, ${escapeHtml(slot.time)}</span></div>
+          <div style="display:flex; justify-content:space-between;"><span style="color:var(--ink-60);">Billed to</span><span>${escapeHtml(booking.businessName)}</span></div>
+          <div style="display:flex; justify-content:space-between;"><span style="color:var(--ink-60);">Status</span>${badgeHtml("paid")}</div>
+        </div>
+      </div>
+      <div style="text-align:center; margin-top: 24px;">
+        <a href="dashboard.html" class="btn btn-dark">Back to dashboard →</a>
+      </div>`;
+  }
+
+  async function init() {
+    session = await requireRole("client");
+    if (!session) return;
+
+    renderNav("dashboard");
+    renderFooter("footer-root");
+
+    await getStations();
+    await getSlots();
+
+    const params = new URLSearchParams(window.location.search);
+    const invoiceId = parseInt(params.get("invoice"), 10);
+
+    const invoices = await getInvoices();
+    const bookings = await getBookings();
+
+    invoice = invoices.find((inv) => inv.id === invoiceId);
+    booking = invoice ? bookings.find((b) => b.id === invoice.bookingId) : null;
+    slot = booking ? slotById(booking.slotId) : null;
+
+    if (!invoice || !booking) {
+      content.innerHTML = `<div class="card"><div class="empty">Invoice not found. Go back to your <a href="dashboard.html" style="color:var(--signal); font-weight:600;">dashboard</a> and select a booking to pay.</div></div>`;
+    } else if (invoice.paymentStatus === "paid") {
+      content.innerHTML = receiptHtml(invoice, booking, slot, true);
+    } else {
+      renderPaymentForm();
+    }
+  }
+
+  window.addEventListener("beforeunload", () => { if (pollTimer) clearInterval(pollTimer); });
+
+  init();
+</script>
+</body>
+</html>
