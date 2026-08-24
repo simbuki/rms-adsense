@@ -1,12 +1,16 @@
+---
+// src/pages/index.astro
+---
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>RMS AdSense — airtime booking marketplace</title>
-  <script is:inline src="/assets/app-data.js"></script>
+  <meta name="description" content="Book Royal Media Services airtime slots directly. Self-serve marketplace for TV and radio ad slots across Kenya." />
+  <link rel="stylesheet" href="/assets/styles.css" />
 </head>
-...
 <body>
   <div id="nav-root"></div>
 
@@ -48,8 +52,8 @@
 
   <div id="footer-root"></div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-  <script src="/assets/config.js"></script>
-  <script src="/assets/app-data.js"></script>
+  <script is:inline src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script is:inline src="/assets/config.js"></script>
+  <script is:inline src="/assets/app-data.js"></script>
 </body>
 </html>
