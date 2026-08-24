@@ -2,5 +2,5 @@ flask==3.0.0
 flask-cors==4.0.0
 requests==2.31.0
 python-dotenv==1.0.0
-supabase==2.4.0
+supabase==2.6.0
 httpx>=0.26,<0.28
