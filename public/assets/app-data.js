@@ -199,32 +199,6 @@ async function register(formData) {
   return session || { error: "Account created, but the profile could not be loaded. Try logging in." };
 }
 
-// Admin self-serve signup: creates the auth user, then redeems a
-// single-use invite code (see supabase/add_admin_invite_flow.sql) to
-// grant admin access. The invite code is required server-side — this
-// function alone cannot make someone an admin without a valid code.
-async function registerAdmin(email, password, inviteCode) {
-  const { data, error } = await sb.auth.signUp({ email, password });
-  if (error) return { error: error.message };
-  if (!data.session) {
-    return { error: "Check your email to confirm your account, then log in with the admin login page and it will pick up your invite automatically on next attempt." };
-  }
-
-  const { error: claimError } = await sb.rpc("claim_admin_invite", { p_code: inviteCode });
-  if (claimError) {
-    return { error: claimError.message || "That invite code isn't valid or has already been used." };
-  }
-
-  const session = await getSession();
-  return session || { error: "Account created, but the profile could not be loaded. Try logging in." };
-}
-
-async function generateAdminInvite() {
-  const { data, error } = await sb.rpc("generate_admin_invite");
-  if (error) throw error;
-  return data;
-}
-
 async function logout() {
   setViewMode("admin");
   await sb.auth.signOut();
@@ -424,10 +398,6 @@ async function adminCreateBooking(slotId, form) {
   return data;
 }
 
-// Admin-only: generates a fresh single-use invite code and emails it
-// directly to the given address via the invite-admin edge function.
-// The edge function's own RPC call re-checks admin status server-side,
-// so this can't be abused even if called with a forged request.
 async function payWithMpesa(invoiceId, phone) {
   const { data } = await sb.auth.getSession();
   const token = data.session?.access_token;
