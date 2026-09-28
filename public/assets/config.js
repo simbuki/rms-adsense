@@ -9,3 +9,9 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 // e.g. "https://rms-adsense-backend.onrender.com". Leave empty to use
 // http://localhost:5000 when running locally.
 const BACKEND_URL = "";
+
+// Paystack PUBLIC key for card payments (starts with pk_test_ or pk_live_).
+// Find it in Paystack: Settings → API Keys & Webhooks. Leave empty to keep
+// the Card option switched off. Never put the secret key (sk_...) here; it
+// goes only in the backend's PAYSTACK_SECRET_KEY environment variable.
+const PAYSTACK_PUBLIC_KEY = "";

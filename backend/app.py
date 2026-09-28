@@ -1,10 +1,11 @@
 """
 RMS AdSense Backend — All Edge Functions Combined
 
-Three endpoints in one Flask app:
+Endpoints in one Flask app:
 1. POST /mpesa-stk — Initiate M-Pesa STK push for payment
 2. POST /mpesa-callback — Receive M-Pesa payment confirmation
 3. POST /password-reset — Send password reset email
+4. POST /paystack-initialize, /paystack-verify, /paystack-webhook — Card payments (paystack.py)
 
 Deploy to Render, Railway, Heroku, or any Python host.
 
@@ -13,6 +14,7 @@ Required environment variables:
   MPESA_CONSUMER_KEY, MPESA_CONSUMER_SECRET, MPESA_SHORTCODE, MPESA_PASSKEY
   MPESA_BASE_URL, MPESA_TRANSACTION_TYPE, MPESA_CALLBACK_URL
   SITE_URL
+  PAYSTACK_SECRET_KEY (card payments; see paystack.py)
 
 Optional environment variables:
   MPESA_CALLBACK_TOKEN  Secret path segment for the callback. When set, Daraja
@@ -36,6 +38,8 @@ from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 from supabase import create_client, Client
 from dotenv import load_dotenv
+
+from paystack import register_paystack
 
 load_dotenv()
 
@@ -78,7 +82,7 @@ if not ALLOWED_ORIGINS:
     print("WARNING: neither ALLOWED_ORIGINS nor SITE_URL is set; browser calls will be blocked by CORS")
 CORS(
     app,
-    resources={r"/(mpesa-stk|password-reset)": {"origins": ALLOWED_ORIGINS}},
+    resources={r"/(mpesa-stk|password-reset|paystack-initialize|paystack-verify)": {"origins": ALLOWED_ORIGINS}},
     allow_headers=["Authorization", "Content-Type"],
     methods=["POST", "OPTIONS"],
 )
@@ -430,6 +434,9 @@ def password_reset():
     except Exception as e:
         # Always return success for security
         return jsonify({"success": True}), 200
+
+
+register_paystack(app, supabase, require_auth)
 
 
 @app.route("/health", methods=["GET"])

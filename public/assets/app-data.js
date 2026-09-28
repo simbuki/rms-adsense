@@ -380,8 +380,8 @@ async function rejectBooking(bookingId) {
   return data;
 }
 
-// Kicks off an M-Pesa STK push via the mpesa-stk edge function. Card
-// payments are intentionally not wired up — see README.
+// Kicks off an M-Pesa STK push via the backend's /mpesa-stk. Card payments
+// go through payWithCard() below.
 // Admin-only: creates and auto-approves a booking directly (phone-in
 // or walk-in clients). Returns the invoice issued for it immediately.
 async function adminCreateBooking(slotId, form) {
@@ -419,6 +419,53 @@ async function payWithMpesa(invoiceId, phone) {
   }
   
   return await response.json();
+}
+
+// Card payments via Paystack. The backend creates the transaction (so the
+// amount always comes from the invoice), the Paystack popup collects the card,
+// then the backend verifies the result with Paystack before marking it paid.
+function cardPaymentsEnabled() {
+  return typeof PAYSTACK_PUBLIC_KEY === "string" && PAYSTACK_PUBLIC_KEY.startsWith("pk_");
+}
+
+async function backendPost(path, payload) {
+  const { data } = await sb.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new Error("Not authenticated");
+
+  const response = await fetch(backendUrl(path), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || "Payment failed");
+  return body;
+}
+
+// Resolves with { paid: true|false } once the popup closes, or rejects on error.
+async function payWithCard(invoiceId) {
+  if (!cardPaymentsEnabled()) throw new Error("Card payments aren't enabled yet.");
+  if (typeof PaystackPop === "undefined") throw new Error("Could not load the card payment form. Check your connection and try again.");
+
+  const { accessCode, reference } = await backendPost("/paystack-initialize", { invoiceId });
+
+  return new Promise((resolve, reject) => {
+    new PaystackPop().resumeTransaction(accessCode, {
+      onSuccess: async () => {
+        try {
+          resolve(await backendPost("/paystack-verify", { reference }));
+        } catch (err) {
+          reject(err);
+        }
+      },
+      onCancel: () => resolve({ paid: false, cancelled: true }),
+      onError: (err) => reject(new Error(err?.message || "Card payment failed")),
+    });
+  });
 }
 
 /* ---------------- Chrome: nav / footer / ticker ---------------- */
