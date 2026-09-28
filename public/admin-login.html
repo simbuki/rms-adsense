@@ -9,14 +9,25 @@
 <body>
 <div id="nav-root"></div>
 
-<div class="wrap" style="max-width: 460px; padding-top: 56px; padding-bottom: 64px;">
+<main id="main" class="wrap auth-shell">
+  <aside class="auth-aside" aria-label="About RMS AdSense">
+    <div class="eyebrow eyebrow-signal">RMS staff</div>
+    <h2>Booking &amp; invoice control.</h2>
+    <p>Review incoming requests, manage the slot catalogue and track payments across every station.</p>
+    <ul>
+      <li>Approve or reject the pending queue</li>
+      <li>Invoices generated the moment a booking is approved</li>
+      <li>Admin accounts are set up by RMS</li>
+    </ul>
+  </aside>
+  <div class="auth-main">
   <div id="error-root"></div>
 
   <!-- Log in -->
   <div id="login-panel">
-    <h1 class="f-display" style="font-size: 30px; font-weight: 700; margin: 0 0 6px;">Admin access.</h1>
-    <p style="color: var(--ink-60); font-size: 14.5px; margin: 0 0 22px;">For RMS sales &amp; admin staff only.</p>
-    <form id="login-form" class="card" style="padding: 24px;">
+    <h1>Admin access.</h1>
+    <p class="lede">For RMS sales &amp; admin staff only.</p>
+    <form id="login-form" class="card">
       <div class="field">
         <label for="login-email">Email</label>
         <input id="login-email" type="email" placeholder="you@rms.co.ke" autocomplete="username" />
@@ -27,8 +38,8 @@
       </div>
       <button type="submit" class="btn btn-signal btn-block" id="login-submit">Log in →</button>
     </form>
-    <p style="font-size: 13px; color: var(--ink-60); margin-top: 16px;">
-      <a href="#" id="forgot-link" style="color: var(--ink-60); text-decoration: underline;">Forgot your password?</a>
+    <p class="auth-links">
+      <a href="#" id="forgot-link">Forgot your password?</a>
     </p>
     <div id="forgot-panel" style="display:none; margin-top: 16px;">
       <div class="card" style="padding: 20px;">
@@ -42,10 +53,11 @@
     </div>
   </div>
 
-  <p style="font-size: 12px; color: var(--ink-40); margin-top: 28px;">
-    Booking airtime as a business? Use the <a href="login.html" style="color:var(--ink-60); font-weight:600;">regular client login</a> instead.
+  <p class="auth-note">
+    Booking airtime as a business? Use the <a href="login.html">regular client login</a> instead.
   </p>
-</div>
+  </div>
+</main>
 
 <div id="footer-root"></div>
 
