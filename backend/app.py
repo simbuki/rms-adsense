@@ -13,6 +13,7 @@ Required environment variables:
   MPESA_CONSUMER_KEY, MPESA_CONSUMER_SECRET, MPESA_SHORTCODE, MPESA_PASSKEY
   MPESA_BASE_URL, MPESA_TRANSACTION_TYPE, MPESA_CALLBACK_URL
   SITE_URL
+  PAYSTACK_SECRET_KEY (card payments; see paystack.py)
 """
 
 import os
@@ -27,6 +28,8 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from supabase import create_client, Client
 from dotenv import load_dotenv
+
+from paystack import register_paystack
 
 load_dotenv()
 
@@ -320,6 +323,9 @@ def password_reset():
     except Exception as e:
         # Always return success for security
         return jsonify({"success": True}), 200
+
+
+register_paystack(app, supabase, require_auth)
 
 
 @app.route("/health", methods=["GET"])
