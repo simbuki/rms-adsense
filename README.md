@@ -24,7 +24,7 @@ The browser talks to Supabase directly (with the anon key and row-level security
 │   ├── dashboard.html        # Client's bookings and invoices
 │   ├── payment.html          # M-Pesa payment UI
 │   ├── reset-password.html   # Set a new password from the reset email link
-│   ├── admin-login.html      # Staff login + invite-code admin signup (not linked from nav)
+│   ├── admin-login.html      # Admin login (not linked from nav)
 │   ├── admin.html            # Admin queue, catalogue and invoices
 │   └── assets/
 │       ├── config.js         # Supabase URL + anon key
@@ -141,19 +141,7 @@ The app binds to Render's `$PORT` automatically. After deploying, register the c
 
 Admin status lives in the `public.admins` table and is checked through the `public.is_admin()` helper (SECURITY DEFINER), which every admin RLS policy uses; `profiles.role` is kept in sync by a trigger.
 
-`admin-login.html` isn't linked from the site nav; reach it by direct URL. Creating an admin account there requires a single-use invite code. For the very first admin, insert a code yourself in the SQL Editor:
-
-```sql
-insert into public.admin_invite_codes (code) values ('replace-with-a-long-random-string');
-```
-
-Then open `admin-login.html` → **Create admin account** and enter that code with an email and password. After that, any logged-in admin can generate more codes from the browser console:
-
-```js
-sb.rpc('generate_admin_invite').then(r => console.log(r.data));
-```
-
-Alternatively, skip invite codes and promote an existing registered account with `supabase/make_admin.sql`.
+There is a single admin and no self-service admin signup. To set it up, register the account once through `login.html`, then edit the email in `supabase/make_admin.sql` and run it in the SQL Editor. The admin signs in at `admin-login.html`, which isn't linked from the site nav; reach it by direct URL.
 
 ## Database
 
@@ -165,10 +153,9 @@ Everything is in `supabase/schema.sql`. Main tables:
 - `slots` — bookable airtime slots
 - `bookings` — client booking requests
 - `invoices` — amounts due, payment status, M-Pesa receipt
-- `admin_invite_codes` — single-use admin signup codes
 - `rate_limits` — throttling state, used only via `check_rate_limit()`
 
-Key RPCs: `submit_booking` (rate limited to 5 per user per 10 minutes), `approve_booking`, `reject_booking`, `admin_create_booking`, `mark_invoice_paid`, `generate_admin_invite`, `claim_admin_invite`.
+Key RPCs: `submit_booking` (rate limited to 5 per user per 10 minutes), `approve_booking`, `reject_booking`, `admin_create_booking`, `mark_invoice_paid`.
 
 Replace the demo station/slot seed with the real RMS catalogue before production.
 
@@ -177,7 +164,6 @@ Replace the demo station/slot seed with the real RMS catalogue before production
 - Only the Supabase **anon** key goes in `config.js`. The service-role key and Daraja secrets live only in the backend's environment.
 - All user-rendered data is HTML-escaped in `app-data.js`, and access control is enforced by Postgres RLS.
 - Keep the `creative-files` bucket private.
-- Admin invite codes grant full admin access; share them privately.
 - `/mpesa-callback` is unauthenticated and does not yet verify the request came from Safaricom, and the backend allows CORS from any origin. Tighten both before going live.
 - Serve everything over HTTPS.
 
