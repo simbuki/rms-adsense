@@ -149,7 +149,11 @@ begin
 end;
 $$;
 
-grant execute on function public.check_rate_limit(text, integer, integer) to authenticated, service_role;
+-- Only the backend (service role) may call this directly. submit_booking()
+-- still calls it internally as its SECURITY DEFINER owner. Letting clients
+-- call it would let them reset their own counter with a 0-second window.
+revoke execute on function public.check_rate_limit(text, integer, integer) from public, anon, authenticated;
+grant execute on function public.check_rate_limit(text, integer, integer) to service_role;
 
 -- =========================================================
 -- Profiles policies
@@ -166,10 +170,16 @@ drop policy if exists "profiles: update own" on public.profiles;
 create policy "profiles: update own" on public.profiles
   for update using (auth.uid() = id);
 
+-- Clients may edit their business details but never their role: the
+-- front end routes on profiles.role, so it must only change via admins.
+revoke update on public.profiles from anon, authenticated;
+grant update (business_name, business_type, county, phone, email) on public.profiles to authenticated;
+
 -- Keep updated_at current on every edit.
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 begin
   new.updated_at = now();
@@ -453,9 +463,18 @@ create index if not exists idx_invoices_payment_status on public.invoices (payme
 
 -- For payments confirmed manually by an admin (cash, bank transfer, etc)
 -- outside the automatic M-Pesa callback flow.
-alter table public.invoices add column if not exists payment_method text not null default 'mpesa' check (payment_method in ('mpesa', 'manual'));
+alter table public.invoices add column if not exists payment_method text not null default 'mpesa';
+alter table public.invoices drop constraint if exists invoices_payment_method_check;
+alter table public.invoices add constraint invoices_payment_method_check
+  check (payment_method in ('mpesa', 'manual', 'card'));
 alter table public.invoices add column if not exists marked_paid_by uuid references auth.users (id);
 alter table public.invoices add column if not exists marked_paid_at timestamptz;
+
+-- Paystack card payments: the transaction reference, set when a card
+-- checkout is initialised and used to verify and match the payment.
+alter table public.invoices add column if not exists paystack_reference text;
+create unique index if not exists uq_invoices_paystack_reference
+  on public.invoices (paystack_reference) where paystack_reference is not null;
 
 alter table public.invoices drop constraint if exists invoices_amount_non_negative;
 alter table public.invoices
@@ -483,6 +502,7 @@ create sequence if not exists public.invoice_no_seq;
 create or replace function public.next_invoice_no()
 returns text
 language sql
+set search_path = public
 as $$
   select 'INV-' || lpad(nextval('public.invoice_no_seq')::text, 4, '0');
 $$;
@@ -720,6 +740,24 @@ end;
 $$;
 
 grant execute on function public.claim_admin_invite(text) to authenticated;
+
+-- =========================================================
+-- Function access. The cleanup block at the top drops and recreates
+-- these, which restores Postgres' default EXECUTE-to-everyone, so the
+-- revokes must run after all the definitions above.
+-- Signed-out visitors can't call any RPC. is_admin() stays callable by
+-- everyone because RLS policies evaluate it on anonymous reads.
+-- Trigger functions are never meant to be called as RPCs.
+-- =========================================================
+revoke execute on function public.submit_booking(integer, text, text, text, text, text, text, text, text) from public, anon;
+revoke execute on function public.admin_create_booking(integer, text, text, text, text, text, text) from public, anon;
+revoke execute on function public.approve_booking(bigint) from public, anon;
+revoke execute on function public.reject_booking(bigint) from public, anon;
+revoke execute on function public.mark_invoice_paid(bigint) from public, anon;
+revoke execute on function public.generate_admin_invite() from public, anon;
+revoke execute on function public.claim_admin_invite(text) from public, anon;
+revoke execute on function public.handle_new_user() from public, anon, authenticated;
+revoke execute on function public.sync_profile_role() from public, anon, authenticated;
 
 -- =========================================================
 -- Storage: creative-files (private bucket)
