@@ -4,10 +4,18 @@
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// Python backend URL (set this to your deployed Python backend)
-const BACKEND_URL = window.location.hostname === 'localhost' 
-  ? 'http://localhost:5000'
-  : `https://${window.location.hostname.replace('www.', '')}-backend.onrender.com`;
+// Python backend base URL, from BACKEND_URL in assets/config.js. On localhost
+// with no value set, falls back to the local Flask server.
+const API_BASE = (typeof BACKEND_URL === "string" && BACKEND_URL)
+  ? BACKEND_URL.replace(/\/+$/, "")
+  : (["localhost", "127.0.0.1"].includes(window.location.hostname) ? "http://localhost:5000" : "");
+
+function backendUrl(path) {
+  if (!API_BASE) {
+    throw new Error("Payments backend is not configured. Set BACKEND_URL in assets/config.js.");
+  }
+  return API_BASE + path;
+}
 
 let _stationsCache = null;
 let _slotsCache = null;
@@ -185,7 +193,7 @@ async function logout() {
 // Sends a password-reset email via Python backend
 async function requestPasswordReset(email) {
   try {
-    const response = await fetch(`${BACKEND_URL}/password-reset`, {
+    const response = await fetch(backendUrl("/password-reset"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email }),
@@ -385,7 +393,7 @@ async function payWithMpesa(invoiceId, phone) {
   
   if (!token) throw new Error("Not authenticated");
   
-  const response = await fetch(`${BACKEND_URL}/mpesa-stk`, {
+  const response = await fetch(backendUrl("/mpesa-stk"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
