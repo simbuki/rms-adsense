@@ -94,8 +94,10 @@ MPESA_CONSUMER_SECRET=your_daraja_secret
 MPESA_SHORTCODE=174379
 MPESA_PASSKEY=your_passkey
 MPESA_BASE_URL=https://sandbox.safaricom.co.ke
-MPESA_CALLBACK_URL=https://your-backend.onrender.com/mpesa-callback
+MPESA_CALLBACK_URL=https://your-backend.onrender.com/mpesa-callback/<MPESA_CALLBACK_TOKEN>
+MPESA_CALLBACK_TOKEN=long_random_string   # e.g. python -c "import secrets; print(secrets.token_urlsafe(32))"
 SITE_URL=https://yoursite.com
+# ALLOWED_ORIGINS=https://yoursite.com,https://www.yoursite.com   # optional, defaults to SITE_URL
 ```
 
 ## API Endpoints
@@ -120,7 +122,7 @@ Initiate M-Pesa payment prompt.
 ```
 
 ### POST `/mpesa-callback`
-Receive payment confirmation from Daraja (no auth needed).
+Receive payment confirmation from Daraja. No JWT (Daraja can't send one), so the callback is never trusted on its own: the secret path token must match, the CheckoutRequestID must belong to an unpaid invoice, the amount must match, and the backend re-checks the result with Daraja's STK status query before marking the invoice paid.
 
 **Request** (from Daraja):
 ```json
