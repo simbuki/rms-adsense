@@ -12,7 +12,7 @@
 <div class="wrap" style="max-width: 520px; padding-top: 28px; padding-bottom: 64px;">
   <div class="eyebrow" style="color: var(--ink-40);">Payment</div>
   <h1 class="f-display" style="font-size: 30px; font-weight: 700; margin: 0 0 20px;">Settle your invoice.</h1>
-  <div id="content-root"></div>
+  <div id="content-root"><div class="card"><div class="empty">Loading your invoice…</div></div></div>
 </div>
 
 <div id="footer-root"></div>
@@ -47,7 +47,7 @@
         </div>
 
         <div id="mpesa-fields">
-          <div class="field"><label>M-Pesa phone number</label><input id="mpesa-phone" placeholder="07XX XXX XXX" value="${booking.phone}" /></div>
+          <div class="field"><label>M-Pesa phone number</label><input id="mpesa-phone" placeholder="07XX XXX XXX" value="${escapeHtml(booking.phone || session.phone || "")}" /></div>
           <div class="hint">You'll get an STK push prompt to enter your PIN and confirm.</div>
         </div>
         <div id="card-fields" style="display:none;">
@@ -198,7 +198,8 @@
 
     invoice = invoices.find((inv) => inv.id === invoiceId);
     booking = invoice ? bookings.find((b) => b.id === invoice.bookingId) : null;
-    slot = booking ? slotById(booking.slotId) : null;
+    // A slot an admin has since removed shouldn't stop the client paying.
+    slot = booking ? (slotById(booking.slotId) || { station_id: null, label: "Slot no longer listed", day: "—", time: "—" }) : null;
 
     if (!invoice || !booking) {
       content.innerHTML = `<div class="card"><div class="empty">Invoice not found. Go back to your <a href="dashboard.html" style="color:var(--signal); font-weight:600;">dashboard</a> and select a booking to pay.</div></div>`;
@@ -211,7 +212,17 @@
 
   window.addEventListener("beforeunload", () => { if (pollTimer) clearInterval(pollTimer); });
 
-  init();
+  // Never leave the page blank: any failure while loading shows a message.
+  init().catch((err) => {
+    console.error(err);
+    content.innerHTML = `<div class="card">
+      <div class="error-box">We couldn't load this invoice. ${escapeHtml((err && err.message) || "Something went wrong.")}</div>
+      <div style="display:flex; gap:10px; margin-top:14px;">
+        <button type="button" class="btn btn-signal" onclick="location.reload()">Try again</button>
+        <a href="dashboard.html" class="btn btn-dark">Back to dashboard</a>
+      </div>
+    </div>`;
+  });
 </script>
 <script src="assets/voiceflow.js" defer></script>
 </body>
