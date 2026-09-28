@@ -7,8 +7,8 @@
 --   - Admin status lives in its own public.admins table (not profiles.role
 --     directly), checked through a non-recursive public.is_admin() helper.
 --   - profiles.role is kept in sync automatically via trigger.
---   - Single-use invite codes let a new admin self-register (email +
---     password + code) instead of a developer manually promoting them.
+--   - There is no self-service admin signup. Admins are added by hand
+--     with supabase/make_admin.sql.
 
 -- =========================================================
 -- Extensions
@@ -149,7 +149,11 @@ begin
 end;
 $$;
 
-grant execute on function public.check_rate_limit(text, integer, integer) to authenticated, service_role;
+-- Only the backend (service role) may call this directly. submit_booking()
+-- still calls it internally as its SECURITY DEFINER owner. Letting clients
+-- call it would let them reset their own counter with a 0-second window.
+revoke execute on function public.check_rate_limit(text, integer, integer) from public, anon, authenticated;
+grant execute on function public.check_rate_limit(text, integer, integer) to service_role;
 
 -- =========================================================
 -- Profiles policies
@@ -166,10 +170,16 @@ drop policy if exists "profiles: update own" on public.profiles;
 create policy "profiles: update own" on public.profiles
   for update using (auth.uid() = id);
 
+-- Clients may edit their business details but never their role: the
+-- front end routes on profiles.role, so it must only change via admins.
+revoke update on public.profiles from anon, authenticated;
+grant update (business_name, business_type, county, phone, email) on public.profiles to authenticated;
+
 -- Keep updated_at current on every edit.
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 begin
   new.updated_at = now();
@@ -453,9 +463,18 @@ create index if not exists idx_invoices_payment_status on public.invoices (payme
 
 -- For payments confirmed manually by an admin (cash, bank transfer, etc)
 -- outside the automatic M-Pesa callback flow.
-alter table public.invoices add column if not exists payment_method text not null default 'mpesa' check (payment_method in ('mpesa', 'manual'));
+alter table public.invoices add column if not exists payment_method text not null default 'mpesa';
+alter table public.invoices drop constraint if exists invoices_payment_method_check;
+alter table public.invoices add constraint invoices_payment_method_check
+  check (payment_method in ('mpesa', 'manual', 'card'));
 alter table public.invoices add column if not exists marked_paid_by uuid references auth.users (id);
 alter table public.invoices add column if not exists marked_paid_at timestamptz;
+
+-- Paystack card payments: the transaction reference, set when a card
+-- checkout is initialised and used to verify and match the payment.
+alter table public.invoices add column if not exists paystack_reference text;
+create unique index if not exists uq_invoices_paystack_reference
+  on public.invoices (paystack_reference) where paystack_reference is not null;
 
 alter table public.invoices drop constraint if exists invoices_amount_non_negative;
 alter table public.invoices
@@ -483,6 +502,7 @@ create sequence if not exists public.invoice_no_seq;
 create or replace function public.next_invoice_no()
 returns text
 language sql
+set search_path = public
 as $$
   select 'INV-' || lpad(nextval('public.invoice_no_seq')::text, 4, '0');
 $$;
@@ -646,80 +666,27 @@ grant execute on function public.mark_invoice_paid(bigint) to authenticated;
 -- key, which bypasses RLS, so no authenticated "mark paid" policy is needed here.
 
 -- =========================================================
--- Admin invite codes — lets a new admin self-register (email +
--- password + code) instead of a developer manually running an
--- "update profiles set role = 'admin'" or editing the admins table
--- by hand. No RLS policies are granted on this table: it's only ever
--- touched through the two SECURITY DEFINER functions below.
+-- Admin invite codes were removed: admins are added by hand with
+-- supabase/make_admin.sql. The cleanup block at the top already drops
+-- generate_admin_invite() and claim_admin_invite(); this drops the table.
 -- =========================================================
-create table if not exists public.admin_invite_codes (
-  code text primary key,
-  created_at timestamptz not null default now(),
-  used_at timestamptz,
-  used_by uuid references auth.users (id)
-);
+drop table if exists public.admin_invite_codes;
 
-alter table public.admin_invite_codes enable row level security;
-
--- Existing admin generates a fresh single-use code to hand to a new hire.
-create or replace function public.generate_admin_invite()
-returns text
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  v_code text;
-begin
-  if not public.is_admin() then
-    raise exception 'Admin only';
-  end if;
-
-  v_code := encode(gen_random_bytes(9), 'base64');
-  v_code := replace(replace(replace(v_code, '/', '_'), '+', '-'), '=', '');
-
-  insert into public.admin_invite_codes (code) values (v_code);
-  return v_code;
-end;
-$$;
-
-grant execute on function public.generate_admin_invite() to authenticated;
-
--- New user redeems a code right after signing up, granting THEMSELVES
--- (auth.uid()) admin access. One-time use.
-create or replace function public.claim_admin_invite(p_code text)
-returns boolean
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  v_row public.admin_invite_codes;
-begin
-  if auth.uid() is null then
-    raise exception 'Not signed in';
-  end if;
-
-  select * into v_row from public.admin_invite_codes
-  where code = p_code and used_at is null
-  for update;
-
-  if not found then
-    raise exception 'Invalid or already-used invite code';
-  end if;
-
-  update public.admin_invite_codes
-  set used_at = now(), used_by = auth.uid()
-  where code = p_code;
-
-  insert into public.admins (id) values (auth.uid())
-  on conflict (id) do nothing;
-
-  return true;
-end;
-$$;
-
-grant execute on function public.claim_admin_invite(text) to authenticated;
+-- =========================================================
+-- Function access. The cleanup block at the top drops and recreates
+-- these, which restores Postgres' default EXECUTE-to-everyone, so the
+-- revokes must run after all the definitions above.
+-- Signed-out visitors can't call any RPC. is_admin() stays callable by
+-- everyone because RLS policies evaluate it on anonymous reads.
+-- Trigger functions are never meant to be called as RPCs.
+-- =========================================================
+revoke execute on function public.submit_booking(integer, text, text, text, text, text, text, text, text) from public, anon;
+revoke execute on function public.admin_create_booking(integer, text, text, text, text, text, text) from public, anon;
+revoke execute on function public.approve_booking(bigint) from public, anon;
+revoke execute on function public.reject_booking(bigint) from public, anon;
+revoke execute on function public.mark_invoice_paid(bigint) from public, anon;
+revoke execute on function public.handle_new_user() from public, anon, authenticated;
+revoke execute on function public.sync_profile_role() from public, anon, authenticated;
 
 -- =========================================================
 -- Storage: creative-files (private bucket)
@@ -790,13 +757,5 @@ where not exists (
 -- =========================================================
 -- Bootstrap your first admin
 -- =========================================================
--- generate_admin_invite() can't be called until an admin already
--- exists. Run this once with your own random string, then redeem it
--- on admin-login.html under "Create admin account":
---
---   insert into public.admin_invite_codes (code) values ('replace-with-a-long-random-string');
---
--- After that, existing admins can mint further codes from the browser
--- console while logged in:
---
---   supabase.rpc('generate_admin_invite').then(r => console.log(r.data));
+-- Register the account once through login.html, then run
+-- supabase/make_admin.sql with that account's email.

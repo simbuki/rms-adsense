@@ -18,6 +18,7 @@
 <div id="footer-root"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://js.paystack.co/v2/inline.js"></script>
 <script src="assets/config.js"></script>
 <script src="assets/app-data.js"></script>
 <script>
@@ -50,7 +51,9 @@
           <div class="hint">You'll get an STK push prompt to enter your PIN and confirm.</div>
         </div>
         <div id="card-fields" style="display:none;">
-          <div class="error-box">Card payments aren't enabled on this deployment yet — a PCI-compliant provider needs to be connected first. Please use M-Pesa for now.</div>
+          ${cardPaymentsEnabled()
+            ? `<div class="hint">Pay by Visa or Mastercard in a secure Paystack window. Your card details go straight to Paystack and never touch our servers.</div>`
+            : `<div class="error-box">Card payments aren't enabled yet. Please use M-Pesa for now.</div>`}
         </div>
 
         <div id="pay-error"></div>
@@ -67,13 +70,16 @@
         document.getElementById("mpesa-fields").style.display = method === "mpesa" ? "block" : "none";
         document.getElementById("card-fields").style.display = method === "card" ? "block" : "none";
         const payBtn = document.getElementById("pay-btn");
-        payBtn.style.display = method === "mpesa" ? "inline-flex" : "none";
+        payBtn.style.display = method === "mpesa" || cardPaymentsEnabled() ? "inline-flex" : "none";
+        payBtn.textContent = payButtonLabel(method);
+        document.getElementById("pay-error").innerHTML = "";
       });
     });
 
     document.getElementById("pay-btn").addEventListener("click", async () => {
       const errorRoot = document.getElementById("pay-error");
       errorRoot.innerHTML = "";
+      if (method === "card") return startCardPayment(errorRoot);
       const phone = document.getElementById("mpesa-phone").value.trim();
       if (!phone) {
         errorRoot.innerHTML = `<div class="error-box">Enter the M-Pesa number to send the payment prompt to.</div>`;
@@ -88,9 +94,35 @@
       } catch (err) {
         errorRoot.innerHTML = `<div class="error-box">${err.message || "Could not start the M-Pesa payment. Try again."}</div>`;
         btn.disabled = false;
-        btn.textContent = `Send M-Pesa prompt for ${KES(invoice.amount)}`;
+        btn.textContent = payButtonLabel("mpesa");
       }
     });
+  }
+
+  function payButtonLabel(method) {
+    return method === "card" ? `Pay ${KES(invoice.amount)} by card` : `Send M-Pesa prompt for ${KES(invoice.amount)}`;
+  }
+
+  async function startCardPayment(errorRoot) {
+    const btn = document.getElementById("pay-btn");
+    btn.disabled = true;
+    btn.textContent = "Opening secure card form…";
+    try {
+      const result = await payWithCard(invoice.id);
+      if (result.paid) {
+        const invoices = await getInvoices();
+        invoice = invoices.find((inv) => inv.id === invoice.id) || invoice;
+        content.innerHTML = receiptHtml(invoice, booking, slot, false);
+        return;
+      }
+      if (!result.cancelled) {
+        errorRoot.innerHTML = `<div class="error-box">We couldn't confirm the card payment yet. If you were charged, it will show as paid on your dashboard shortly.</div>`;
+      }
+    } catch (err) {
+      errorRoot.innerHTML = `<div class="error-box">${escapeHtml(err.message || "Could not complete the card payment. Try again.")}</div>`;
+    }
+    btn.disabled = false;
+    btn.textContent = payButtonLabel("card");
   }
 
   function showAwaitingConfirmation() {
