@@ -82,6 +82,7 @@ python app.py
 ```javascript
 const SUPABASE_URL = "https://YOUR_PROJECT.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGci..."; // from Supabase dashboard
+const BACKEND_URL = "https://YOUR_BACKEND.onrender.com"; // deployed backend/app.py; leave "" for localhost:5000
 ```
 
 ### Backend: `.env`
