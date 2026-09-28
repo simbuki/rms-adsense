@@ -9,7 +9,18 @@
 <body>
 <div id="nav-root"></div>
 
-<div class="wrap" style="max-width: 460px; padding-top: 56px; padding-bottom: 64px;">
+<main id="main" class="wrap auth-shell">
+  <aside class="auth-aside" aria-label="About RMS AdSense">
+    <div class="eyebrow eyebrow-signal">Advertise on RMS</div>
+    <h2>Book airtime on Kenya’s biggest stations.</h2>
+    <p>Pick an open TV or radio slot, send your creative, and pay online once RMS approves it.</p>
+    <ul>
+      <li>National TV, vernacular radio and urban FM in one catalogue</li>
+      <li>Clear prices on every slot, no agency mark-up</li>
+      <li>Track approvals and invoices from your dashboard</li>
+    </ul>
+  </aside>
+  <div class="auth-main">
   <div class="pill-tabs" id="mode-tabs">
     <button type="button" class="pill-tab active" data-mode="login">Log in</button>
     <button type="button" class="pill-tab" data-mode="register">Create an account</button>
@@ -19,9 +30,9 @@
 
   <!-- Log in -->
   <div id="login-panel">
-    <h1 class="f-display" style="font-size: 30px; font-weight: 700; margin: 0 0 6px;">Welcome back.</h1>
-    <p style="color: var(--ink-60); font-size: 14.5px; margin: 0 0 22px;">Log in to browse slots, submit bookings, and manage invoices.</p>
-    <form id="login-form" class="card" style="padding: 24px;">
+    <h1>Welcome back.</h1>
+    <p class="lede">Log in to browse slots, submit bookings, and manage invoices.</p>
+    <form id="login-form" class="card">
       <div class="field">
         <label for="login-email">Email</label>
         <input id="login-email" type="email" placeholder="you@business.co.ke" autocomplete="username" />
@@ -32,8 +43,8 @@
       </div>
       <button type="submit" class="btn btn-signal btn-block" id="login-submit">Log in →</button>
     </form>
-    <p style="font-size: 13px; color: var(--ink-60); margin-top: 16px;">
-      <a href="#" id="forgot-link" style="color: var(--ink-60); text-decoration: underline;">Forgot your password?</a>
+    <p class="auth-links">
+      <a href="#" id="forgot-link">Forgot your password?</a>
     </p>
     <div id="forgot-panel" style="display:none; margin-top: 16px;">
       <div class="card" style="padding: 20px;">
@@ -45,16 +56,16 @@
         <button type="button" class="btn btn-dark btn-block" id="forgot-submit">Send reset link →</button>
       </div>
     </div>
-    <p style="font-size: 13px; color: var(--ink-60); margin-top: 16px;">
-      Don't have an account yet? <a href="#" data-mode="register" style="color: var(--signal); font-weight: 600;">Create one</a>.
+    <p class="auth-links">
+      Don't have an account yet? <a href="#" data-mode="register">Create one</a>.
     </p>
   </div>
 
   <!-- Register -->
   <div id="register-panel" style="display:none;">
-    <h1 class="f-display" style="font-size: 30px; font-weight: 700; margin: 0 0 6px;">Create your business account.</h1>
-    <p style="color: var(--ink-60); font-size: 14.5px; margin: 0 0 22px;">Set up an account to start booking RMS airtime directly.</p>
-    <form id="register-form" class="card" style="padding: 24px;">
+    <h1>Create your business account.</h1>
+    <p class="lede">Set up an account to start booking RMS airtime directly.</p>
+    <form id="register-form" class="card">
       <div class="field"><label for="reg-businessName">Business name</label><input id="reg-businessName" placeholder="e.g. GreenLeaf Agrovet" /></div>
       <div class="field"><label for="reg-businessType">Business type</label><input id="reg-businessType" placeholder="e.g. Retail, Agribusiness" /></div>
       <div class="field"><label for="reg-county">County</label><input id="reg-county" placeholder="e.g. Kiambu" /></div>
@@ -63,15 +74,16 @@
       <div class="field"><label for="reg-password">Password</label><input id="reg-password" type="password" placeholder="At least 8 characters" autocomplete="new-password" /></div>
       <button type="submit" class="btn btn-signal btn-block" id="register-submit">Create account →</button>
     </form>
-    <p style="font-size: 13px; color: var(--ink-60); margin-top: 16px;">
-      Already have an account? <a href="#" data-mode="login" style="color: var(--signal); font-weight: 600;">Log in</a>.
+    <p class="auth-links">
+      Already have an account? <a href="#" data-mode="login">Log in</a>.
     </p>
   </div>
 
-  <p style="font-size: 12px; color: var(--ink-40); margin-top: 28px;">
+  <p class="auth-note">
     RMS sales &amp; admin staff should log in with the account issued by their system administrator.
   </p>
-</div>
+  </div>
+</main>
 
 <div id="footer-root"></div>
 

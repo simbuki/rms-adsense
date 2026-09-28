@@ -1,10 +1,11 @@
 """
 RMS AdSense Backend — All Edge Functions Combined
 
-Three endpoints in one Flask app:
+Endpoints in one Flask app:
 1. POST /mpesa-stk — Initiate M-Pesa STK push for payment
 2. POST /mpesa-callback — Receive M-Pesa payment confirmation
 3. POST /password-reset — Send password reset email
+4. POST /paystack-initialize, /paystack-verify, /paystack-webhook — Card payments (paystack.py)
 
 Deploy to Render, Railway, Heroku, or any Python host.
 
@@ -14,18 +15,27 @@ Required environment variables:
   MPESA_BASE_URL, MPESA_TRANSACTION_TYPE, MPESA_CALLBACK_URL
   SITE_URL
   PAYSTACK_SECRET_KEY (card payments; see paystack.py)
+
+Optional environment variables:
+  MPESA_CALLBACK_TOKEN  Secret path segment for the callback. When set, Daraja
+                        must call /mpesa-callback/<token> (put the token in
+                        MPESA_CALLBACK_URL) and the bare /mpesa-callback is refused.
+  ALLOWED_ORIGINS       Comma-separated browser origins allowed by CORS.
+                        Defaults to SITE_URL.
+  TRUSTED_PROXY_HOPS    Reverse proxies in front of the app (default 1, e.g. Render).
 """
 
 import os
 import json
 import base64
-import hashlib
+import hmac
 from datetime import datetime
 from functools import wraps
 
 import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from werkzeug.middleware.proxy_fix import ProxyFix
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
@@ -34,7 +44,6 @@ from paystack import register_paystack
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
 
 # ============================================================================
 # Configuration
@@ -53,23 +62,50 @@ MPESA_BASE_URL = os.getenv("MPESA_BASE_URL", "https://sandbox.safaricom.co.ke")
 MPESA_TRANSACTION_TYPE = os.getenv("MPESA_TRANSACTION_TYPE", "CustomerPayBillOnline")
 MPESA_CALLBACK_URL = os.getenv("MPESA_CALLBACK_URL")
 
+MPESA_CALLBACK_TOKEN = os.getenv("MPESA_CALLBACK_TOKEN", "")
+
 # Site
 SITE_URL = os.getenv("SITE_URL")
 
+# Trust X-Forwarded-For only from our own proxy hop(s), so request.remote_addr
+# is the real client IP and can't be spoofed by a client-supplied header.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=int(os.getenv("TRUSTED_PROXY_HOPS", "1")))
 
-def cors_headers():
-    """Return CORS headers"""
-    return {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "authorization, content-type",
-        "Content-Type": "application/json",
-    }
+# CORS: only the site itself may call the API from a browser. The M-Pesa
+# callback is server-to-server and needs no CORS at all.
+ALLOWED_ORIGINS = [
+    o.strip().rstrip("/")
+    for o in (os.getenv("ALLOWED_ORIGINS") or SITE_URL or "").split(",")
+    if o.strip()
+]
+if not ALLOWED_ORIGINS:
+    print("WARNING: neither ALLOWED_ORIGINS nor SITE_URL is set; browser calls will be blocked by CORS")
+CORS(
+    app,
+    resources={r"/(mpesa-stk|password-reset|paystack-initialize|paystack-verify)": {"origins": ALLOWED_ORIGINS}},
+    allow_headers=["Authorization", "Content-Type"],
+    methods=["POST", "OPTIONS"],
+)
+
+
+def rate_limited(key, max_count, window_seconds):
+    """True if `key` has exceeded max_count within window_seconds (shared across instances via Supabase)."""
+    result = supabase.rpc("check_rate_limit", {
+        "p_key": key,
+        "p_max_count": max_count,
+        "p_window_seconds": window_seconds,
+    }).execute()
+    return not result.data
 
 
 def require_auth(f):
     """Decorator: require Authorization header with valid JWT"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        # CORS preflights never carry credentials; let them through.
+        if request.method == "OPTIONS":
+            return "", 204
+
         auth_header = request.headers.get("Authorization", "")
         if not auth_header.startswith("Bearer "):
             return (
@@ -125,6 +161,40 @@ def get_mpesa_timestamp():
     return datetime.now().strftime("%Y%m%d%H%M%S")
 
 
+def get_mpesa_password(timestamp):
+    """Daraja password: base64(shortcode + passkey + timestamp)"""
+    return base64.b64encode(f"{MPESA_SHORTCODE}{MPESA_PASSKEY}{timestamp}".encode()).decode()
+
+
+def query_stk_status(checkout_request_id):
+    """
+    Ask Daraja directly for the result of an STK push.
+
+    The callback endpoint is public, so its payload can't be trusted on its
+    own. This query goes out over our own authenticated connection to
+    Safaricom, so a successful answer here is the real proof of payment.
+    Returns the response dict, or None if the query itself failed.
+    """
+    access_token = get_mpesa_auth_token()
+    timestamp = get_mpesa_timestamp()
+    payload = {
+        "BusinessShortCode": MPESA_SHORTCODE,
+        "Password": get_mpesa_password(timestamp),
+        "Timestamp": timestamp,
+        "CheckoutRequestID": checkout_request_id,
+    }
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+    url = f"{MPESA_BASE_URL}/mpesa/stkpushquery/v1/query"
+    response = requests.post(url, json=payload, headers=headers, timeout=15)
+    if response.status_code != 200:
+        print(f"STK query failed for {checkout_request_id}: {response.status_code} {response.text}")
+        return None
+    return response.json()
+
+
 def normalize_phone(phone):
     """Convert phone to 254XXXXXXXXX format"""
     digits = "".join(c for c in phone if c.isdigit())
@@ -155,6 +225,9 @@ def mpesa_stk():
         return "", 204
     
     try:
+        if rate_limited(f"mpesa_stk:{request.user.id}", 5, 600):
+            return jsonify({"error": "Too many payment attempts. Please wait a few minutes and try again"}), 429
+
         body = request.get_json() or {}
         invoice_id = body.get("invoiceId")
         phone = body.get("phone")
@@ -186,8 +259,7 @@ def mpesa_stk():
         
         # Prepare STK push
         timestamp = get_mpesa_timestamp()
-        password_string = f"{MPESA_SHORTCODE}{MPESA_PASSKEY}{timestamp}"
-        password = base64.b64encode(password_string.encode()).decode()
+        password = get_mpesa_password(timestamp)
         msisdn = normalize_phone(phone)
         
         stk_payload = {
@@ -235,55 +307,99 @@ def mpesa_stk():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/mpesa-callback", methods=["OPTIONS", "POST"])
-def mpesa_callback():
+def _callback_item(items, name):
+    for item in items or []:
+        if isinstance(item, dict) and item.get("Name") == name:
+            return item.get("Value")
+    return None
+
+
+@app.route("/mpesa-callback", methods=["POST"])
+@app.route("/mpesa-callback/<token>", methods=["POST"])
+def mpesa_callback(token=None):
     """
     Receive M-Pesa payment confirmation from Daraja.
-    No authentication (Daraja cannot send JWT).
+
+    Daraja can't send a JWT, so this endpoint is public. A callback is never
+    trusted on its own; before an invoice is marked paid:
+      1. the secret path token must match (when MPESA_CALLBACK_TOKEN is set),
+      2. the CheckoutRequestID must belong to an unpaid invoice,
+      3. the reported amount must match the invoice amount,
+      4. Daraja's STK status query must independently confirm success.
+
+    Always answers 200 with Daraja's expected ack so Safaricom doesn't retry
+    forged or irrelevant requests; rejections are logged instead.
     """
-    if request.method == "OPTIONS":
-        return "", 204
-    
+    ack = jsonify({"ResultCode": 0, "ResultDesc": "Accepted"})
+
+    if MPESA_CALLBACK_TOKEN and not hmac.compare_digest(token or "", MPESA_CALLBACK_TOKEN):
+        print(f"Callback rejected: bad or missing token from {request.remote_addr}")
+        return jsonify({"error": "Not found"}), 404
+
     try:
-        body = request.get_json() or {}
-        stk_callback = body.get("Body", {}).get("stkCallback", {})
-        
-        if not stk_callback:
-            return jsonify({"ok": True}), 200
-        
-        result_code = stk_callback.get("ResultCode")
+        if rate_limited(f"mpesa_callback:{request.remote_addr}", 60, 60):
+            print(f"Callback rejected: rate limited {request.remote_addr}")
+            return jsonify({"error": "Too many requests"}), 429
+
+        body = request.get_json(silent=True) or {}
+        stk_callback = (body.get("Body") or {}).get("stkCallback") or {}
         checkout_request_id = stk_callback.get("CheckoutRequestID")
-        
-        # Payment succeeded
-        if result_code == 0:
-            callback_metadata = stk_callback.get("CallbackMetadata", {})
-            items = callback_metadata.get("Item", [])
-            
-            receipt = None
-            for item in items:
-                if item.get("Name") == "MpesaReceiptNumber":
-                    receipt = str(item.get("Value", ""))
-                    break
-            
-            # Mark invoice as paid
-            supabase.table("invoices").update({
-                "payment_status": "paid",
-                "payment_method": "mpesa",
-                "mpesa_receipt": receipt,
-            }).eq("mpesa_checkout_request_id", checkout_request_id).execute()
-        
-        return jsonify({"ok": True}), 200
-    
+
+        if not isinstance(checkout_request_id, str) or not checkout_request_id:
+            return ack, 200
+
+        # Failed or cancelled payments change nothing.
+        if str(stk_callback.get("ResultCode")) != "0":
+            return ack, 200
+
+        invoice_result = supabase.table("invoices").select(
+            "id, amount, payment_status"
+        ).eq("mpesa_checkout_request_id", checkout_request_id).execute()
+
+        if not invoice_result.data:
+            print(f"Callback rejected: unknown CheckoutRequestID {checkout_request_id}")
+            return ack, 200
+
+        invoice = invoice_result.data[0]
+        if invoice.get("payment_status") == "paid":
+            return ack, 200
+
+        items = (stk_callback.get("CallbackMetadata") or {}).get("Item") or []
+        amount = _callback_item(items, "Amount")
+        receipt = _callback_item(items, "MpesaReceiptNumber")
+
+        try:
+            amount_ok = int(float(amount)) == int(invoice.get("amount", 0))
+        except (TypeError, ValueError):
+            amount_ok = False
+        if not amount_ok or not receipt:
+            print(f"Callback rejected: invoice {invoice['id']} amount/receipt mismatch ({amount!r}, {receipt!r})")
+            return ack, 200
+
+        status = query_stk_status(checkout_request_id)
+        if not status or str(status.get("ResultCode")) != "0":
+            print(f"Callback rejected: Daraja did not confirm {checkout_request_id}: {status}")
+            return ack, 200
+
+        # Mark invoice as paid (only if still unpaid, so replays are no-ops)
+        supabase.table("invoices").update({
+            "payment_status": "paid",
+            "payment_method": "mpesa",
+            "mpesa_receipt": str(receipt),
+        }).eq("id", invoice["id"]).eq("payment_status", "unpaid").execute()
+
+        return ack, 200
+
     except Exception as e:
         print(f"Callback error: {str(e)}")
-        return jsonify({"ok": True}), 200
+        return ack, 200
 
 
 @app.route("/password-reset", methods=["OPTIONS", "POST"])
 def password_reset():
     """
     Send password reset email.
-    Rate limited: 3 per email per hour.
+    Rate limited: 3 per email and 10 per IP per hour.
     """
     if request.method == "OPTIONS":
         return "", 204
@@ -299,14 +415,9 @@ def password_reset():
         if "@" not in email or "." not in email.split("@")[-1]:
             return jsonify({"error": "Enter a valid email address"}), 400
         
-        # Rate limit check
-        rate_limit_result = supabase.rpc("check_rate_limit", {
-            "p_key": f"password_reset:{email.lower()}",
-            "p_max_count": 3,
-            "p_window_seconds": 3600,
-        }).execute()
-        
-        if not rate_limit_result.data:
+        # Rate limit per email and per client IP
+        if (rate_limited(f"password_reset:{email.lower()}", 3, 3600)
+                or rate_limited(f"password_reset_ip:{request.remote_addr}", 10, 3600)):
             return jsonify({
                 "error": "Too many password reset requests. Please try again later"
             }), 429
