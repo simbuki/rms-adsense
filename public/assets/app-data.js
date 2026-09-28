@@ -424,8 +424,9 @@ async function renderNav(active) {
   }
 
   root.innerHTML = `
-    <nav class="site-nav${onDark ? " on-dark" : ""}">
-      <a class="brand" href="index.html">RMS <span>AdSense</span></a>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <nav class="site-nav${onDark ? " on-dark" : ""}" aria-label="Main">
+      <a class="brand" href="index.html" aria-label="RMS AdSense home"><i class="brand-mark" aria-hidden="true"></i>RMS <span>AdSense</span></a>
       <div class="links">${links}</div>
     </nav>`;
 
@@ -438,8 +439,33 @@ function renderFooter(rootId) {
   if (!root) return;
   root.innerHTML = `
     <footer class="site-footer">
-      <span>© ${new Date().getFullYear()} RMS AdSense — Royal Media Services</span>
-      <span>A self-service marketplace for TV &amp; radio airtime</span>
+      <div class="wrap footer-grid">
+        <div>
+          <div class="footer-brand"><i class="brand-mark" aria-hidden="true"></i>RMS <span>AdSense</span></div>
+          <p class="footer-blurb">A self-service marketplace for Royal Media Services television and radio airtime. Browse open slots, book directly, and pay online.</p>
+        </div>
+        <div>
+          <div class="footer-heading">Advertisers</div>
+          <ul class="footer-links">
+            <li><a href="browse.html">Browse airtime</a></li>
+            <li><a href="dashboard.html">My bookings</a></li>
+            <li><a href="login.html?tab=register">Create an account</a></li>
+          </ul>
+        </div>
+        <div>
+          <div class="footer-heading">RMS staff</div>
+          <ul class="footer-links">
+            <li><a href="admin-login.html">Admin access</a></li>
+            <li><a href="admin.html">Booking control</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bar">
+        <div class="wrap">
+          <span>© ${new Date().getFullYear()} RMS AdSense — Royal Media Services</span>
+          <span>TV &amp; radio airtime, booked direct</span>
+        </div>
+      </div>
     </footer>`;
 }
 
@@ -448,5 +474,6 @@ async function renderTicker(rootId) {
   if (!root) return;
   const stations = await getStations();
   const items = stations.map((s) => `${s.name} · ${s.type}`).join("   —   ") || "Loading stations…";
-  root.innerHTML = `<div class="ticker-track">${items}   —   ${items}</div>`;
+  root.innerHTML = `<div class="ticker-label">On air</div>
+    <div class="ticker-viewport"><div class="ticker-track">${items}   —   ${items}   —   </div></div>`;
 }
