@@ -68,15 +68,54 @@ async function getSession() {
     .eq("id", session.user.id)
     .single();
   if (error || !profile) return null;
+
+  // Real admin status comes from the admins table (self-read RLS), not
+  // profiles.role, so the view switch below can only ever be offered to
+  // genuine admins.
+  const { data: adminRow } = await sb
+    .from("admins")
+    .select("id")
+    .eq("id", session.user.id)
+    .maybeSingle();
+  const isAdmin = !!adminRow;
+
   return {
     id: session.user.id,
     email: profile.email,
     role: profile.role,
+    isAdmin,
+    // What the pages render as. An admin who flipped the view switch sees
+    // the client side; their real role and permissions are untouched.
+    viewRole: isAdmin && getViewMode() === "client" ? "client" : profile.role,
     name: profile.business_name,
     businessType: profile.business_type,
     county: profile.county,
     phone: profile.phone,
   };
+}
+
+/* ---------------- Admin view switch ---------------- */
+
+// Lets an admin preview the client side of the site. Stored per browser
+// and purely cosmetic: RLS still treats them as an admin.
+const VIEW_MODE_KEY = "rms-view-mode";
+
+function getViewMode() {
+  try { return localStorage.getItem(VIEW_MODE_KEY) === "client" ? "client" : "admin"; }
+  catch (e) { return "admin"; }
+}
+
+function setViewMode(mode) {
+  try {
+    if (mode === "client") localStorage.setItem(VIEW_MODE_KEY, "client");
+    else localStorage.removeItem(VIEW_MODE_KEY);
+  } catch (e) { /* storage blocked: switch just won't stick */ }
+}
+
+function toggleViewMode() {
+  const next = getViewMode() === "client" ? "admin" : "client";
+  setViewMode(next);
+  window.location.href = next === "client" ? "browse.html" : "admin.html";
 }
 
 // Redirects away if there's no session or the wrong role. Returns the
@@ -88,14 +127,15 @@ async function requireRole(role) {
     window.location.href = "login.html";
     return null;
   }
-  if (session.role !== role) {
-    window.location.href = session.role === "admin" ? "admin.html" : "browse.html";
+  if (session.viewRole !== role) {
+    window.location.href = session.viewRole === "admin" ? "admin.html" : "browse.html";
     return null;
   }
   return session;
 }
 
 async function login(email, password) {
+  setViewMode("admin"); // every fresh login starts in the admin's own view
   const { data, error } = await sb.auth.signInWithPassword({ email, password });
   if (error) {
     if (error.message && error.message.toLowerCase().includes("email not confirmed")) {
@@ -178,6 +218,7 @@ async function generateAdminInvite() {
 }
 
 async function logout() {
+  setViewMode("admin");
   await sb.auth.signOut();
   window.location.href = "login.html";
 }
@@ -414,7 +455,7 @@ async function renderNav(active) {
   if (!session) {
     links = `<a class="nav-link" href="login.html">Log in</a>
              <a class="btn btn-signal btn-sm" href="login.html?tab=register">Get started</a>`;
-  } else if (session.role === "admin") {
+  } else if (session.viewRole === "admin") {
     links = `<a class="nav-link${active === "admin" ? " active" : ""}" href="admin.html">Admin</a>
              <button type="button" class="nav-link" id="logout-btn">Log out</button>`;
   } else {
@@ -423,12 +464,34 @@ async function renderNav(active) {
              <button type="button" class="nav-link" id="logout-btn">Log out</button>`;
   }
 
+  // Cycle button beside the logo, shown only to real admins.
+  let viewSwitch = "";
+  let previewBanner = "";
+  if (session && session.isAdmin) {
+    const inClient = session.viewRole === "client";
+    const label = inClient ? "Switch to admin view" : "Switch to client view";
+    viewSwitch = `<button type="button" class="view-switch" id="view-switch-btn" title="${label}" aria-label="${label}">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M20 11a8 8 0 0 0-14.3-4.9M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9M20 20v-4h-4"/></svg>
+        <span>${inClient ? "Client" : "Admin"}</span>
+      </button>`;
+    if (inClient) {
+      previewBanner = `<div class="view-banner" role="status">You're previewing the client side as an admin. Use the switch by the logo to go back.</div>`;
+    }
+  }
+
   root.innerHTML = `
     <a class="skip-link" href="#main">Skip to content</a>
     <nav class="site-nav${onDark ? " on-dark" : ""}" aria-label="Main">
-      <a class="brand" href="index.html" aria-label="RMS AdSense home"><i class="brand-mark" aria-hidden="true"></i>RMS <span>AdSense</span></a>
+      <div class="brand-group">
+        <a class="brand" href="index.html" aria-label="RMS AdSense home"><i class="brand-mark" aria-hidden="true"></i>RMS <span>AdSense</span></a>
+        ${viewSwitch}
+      </div>
       <div class="links">${links}</div>
-    </nav>`;
+    </nav>
+    ${previewBanner}`;
+
+  const switchBtn = document.getElementById("view-switch-btn");
+  if (switchBtn) switchBtn.addEventListener("click", toggleViewMode);
 
   const logoutBtn = document.getElementById("logout-btn");
   if (logoutBtn) logoutBtn.addEventListener("click", logout);

@@ -279,6 +279,41 @@ main { flex: 1 0 auto; }
   background: var(--paper);
 }
 
+.brand-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Admin-only cycle button: flips between admin and client views */
+.view-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+  background: var(--signal);
+  border: 2px solid var(--signal);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.view-switch:hover { background: transparent; color: var(--signal); }
+.view-switch:hover svg { transform: rotate(180deg); }
+.view-switch svg { transition: transform 0.3s ease; }
+
+.view-banner {
+  padding: 8px var(--gutter);
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--signal);
+}
+
 .site-nav .links {
   display: flex;
   align-items: center;
