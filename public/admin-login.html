@@ -89,7 +89,7 @@
     try {
       const result = await requestPasswordReset(email);
       if (result.error) {
-        resultRoot.innerHTML = `<div class="error-box">${result.error}</div>`;
+        resultRoot.innerHTML = `<div class="error-box">${escapeHtml(result.error)}</div>`;
       } else {
         resultRoot.innerHTML = `<div class="success-box">If an account exists for that email, a reset link is on its way.</div>`;
       }
