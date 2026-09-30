@@ -205,25 +205,20 @@ async function logout() {
   window.location.href = "login.html";
 }
 
-// Sends a password-reset email via Python backend
+// Sends a password-reset email straight from Supabase Auth. This needs no
+// secrets, so it works without the Python backend; Supabase applies its own
+// per-email and per-IP email rate limits. The link returns the user to
+// reset-password.html on whichever site they asked from, so that origin must
+// be in Supabase's Authentication → URL Configuration → Redirect URLs.
 async function requestPasswordReset(email) {
-  try {
-    const response = await fetch(backendUrl("/password-reset"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email }),
-    });
-    
-    const data = await response.json();
-    
-    if (!response.ok) {
-      return { error: data.error || "Could not send reset email" };
-    }
-    
-    return { success: true };
-  } catch (err) {
-    return { error: err.message || "Could not send reset email" };
+  const { error } = await sb.auth.resetPasswordForEmail(email, {
+    redirectTo: `${window.location.origin}/reset-password.html`,
+  });
+  if (!error) return { success: true };
+  if (error.status === 429) {
+    return { error: "Too many reset requests. Please wait a few minutes and try again." };
   }
+  return { error: error.message || "Could not send reset email" };
 }
 
 // Called from reset-password.html once Supabase has established a

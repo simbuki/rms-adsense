@@ -8,10 +8,10 @@ A self-serve marketplace for booking TV and radio airtime slots across Royal Med
 |-------|-----------|---------------|
 | Frontend | Static HTML/JS in `public/`, built with Astro | Vercel |
 | Data + auth | Supabase (Postgres, Auth, Storage, RLS) | Supabase |
-| Backend | Python Flask (`backend/app.py`, `backend/paystack.py`): M-Pesa STK push and callback, Paystack card payments, password reset | Render |
+| Backend | Python Flask (`backend/app.py`, `backend/paystack.py`): M-Pesa STK push and callback, Paystack card payments | Render |
 | Payments | Safaricom Daraja (M-Pesa STK push), Paystack (cards) | — |
 
-The browser talks to Supabase directly (with the anon key and row-level security) for everything except the operations that need secrets: M-Pesa, card payments and password-reset emails go through the Flask backend, which holds the Supabase service-role key, Daraja credentials and the Paystack secret key.
+The browser talks to Supabase directly (with the anon key and row-level security) for everything except the operations that need secrets: M-Pesa and card payments go through the Flask backend, which holds the Supabase service-role key, Daraja credentials and the Paystack secret key.
 
 ## Project structure
 
@@ -156,7 +156,9 @@ Create a **Web Service** from this repo:
 
 The app binds to Render's `$PORT` automatically. After deploying, register the callback URL with Safaricom, and in Paystack (Settings → API Keys & Webhooks) set the webhook URL to `https://<your-service>.onrender.com/paystack-webhook`.
 
-**Backend URL in the frontend:** set `BACKEND_URL` in `public/assets/config.js` to the Render service URL. If it is empty on a non-localhost site, payments and password reset show a "backend is not configured" error.
+**Password reset** is sent straight from the browser with Supabase's `resetPasswordForEmail`, so it does not need the backend. The emailed link opens `<site>/reset-password.html`, so every live origin (e.g. `https://rms-adsense.vercel.app/**`) must be listed under Supabase → Authentication → URL Configuration → Redirect URLs. The backend's `/password-reset` endpoint is kept for compatibility but the site no longer calls it.
+
+**Backend URL in the frontend:** set `BACKEND_URL` in `public/assets/config.js` to the Render service URL. If it is empty on a non-localhost site, payments show a "backend is not configured" error.
 
 ## Admin setup
 
