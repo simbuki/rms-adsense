@@ -14,4 +14,4 @@ const BACKEND_URL = "";
 // Find it in Paystack: Settings → API Keys & Webhooks. Leave empty to keep
 // the Card option switched off. Never put the secret key (sk_...) here; it
 // goes only in the backend's PAYSTACK_SECRET_KEY environment variable.
-const PAYSTACK_PUBLIC_KEY = "";
+const PAYSTACK_PUBLIC_KEY = "pk_test_bc851f06c301902704f665b0c054e9c3ba962002";
