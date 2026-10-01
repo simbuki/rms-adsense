@@ -43,10 +43,27 @@
     invoices = await getInvoices();
   }
 
+  /* Display-only sample revenue, shown while no real paid invoices exist.
+     Oldest to newest month (KES). Nothing here is written to the database;
+     the real figures take over automatically once any invoice is paid.
+     Set SHOW_SAMPLE_REVENUE to false to always show the real numbers. */
+  const SHOW_SAMPLE_REVENUE = true;
+  const SAMPLE_MONTHLY_REVENUE = [1240000, 1385500, 1512000, 1468750, 1694300, 1872600];
+
+  function hasRealRevenue() {
+    return invoices.some((inv) => inv.paymentStatus === "paid" && inv.amount > 0);
+  }
+
+  function useSampleRevenue() {
+    return SHOW_SAMPLE_REVENUE && !hasRealRevenue();
+  }
+
   function renderStats() {
     const counts = { open: 0, pending: 0, booked: 0 };
     slots.forEach((s) => counts[s.status] = (counts[s.status] || 0) + 1);
-    const revenue = invoices.filter((inv) => inv.paymentStatus === "paid").reduce((sum, inv) => sum + inv.amount, 0);
+    const revenue = useSampleRevenue()
+      ? SAMPLE_MONTHLY_REVENUE.reduce((sum, n) => sum + n, 0)
+      : invoices.filter((inv) => inv.paymentStatus === "paid").reduce((sum, inv) => sum + inv.amount, 0);
     document.getElementById("stats-root").innerHTML = `
       <div class="card" style="border-top-color:var(--open);"><div class="stat-value" style="color:var(--open);">${counts.open}</div><div class="stat-caption">Open slots</div></div>
       <div class="card" style="border-top-color:var(--pending);"><div class="stat-value" style="color:var(--pending);">${counts.pending}</div><div class="stat-caption">Pending review</div></div>
@@ -411,11 +428,15 @@
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       months.push({ key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`, label: d.toLocaleString("en-KE", { month: "short" }), total: 0 });
     }
-    invoices.filter((inv) => inv.paymentStatus === "paid").forEach((inv) => {
-      const key = inv.issuedDate.slice(0, 7);
-      const m = months.find((m) => m.key === key);
-      if (m) m.total += inv.amount;
-    });
+    if (useSampleRevenue()) {
+      months.forEach((m, i) => { m.total = SAMPLE_MONTHLY_REVENUE[i]; });
+    } else {
+      invoices.filter((inv) => inv.paymentStatus === "paid").forEach((inv) => {
+        const key = inv.issuedDate.slice(0, 7);
+        const m = months.find((m) => m.key === key);
+        if (m) m.total += inv.amount;
+      });
+    }
     const max = Math.max(1, ...months.map((m) => m.total));
     const totalRevenue = months.reduce((sum, m) => sum + m.total, 0);
 
